@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>分批加仓策略跟踪 · 金正大等自定义（经典版）</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #3d9cf5;
+      --buy: #34c759;
+      --sell: #ff9f0a;
+      --warn: #ff453a;
+      --radius: 10px;
+      --font: "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: linear-gradient(165deg, #0c1018 0%, #151d2e 50%, #0f1419 100%);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 1.25rem;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+    }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    section, .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.15rem;
+    }
+    section h2, .card h2 {
+      font-size: 0.95rem;
+      margin: 0 0 0.85rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    input, select, button {
+      font-family: inherit;
+      font-size: 0.95rem;
+    }
+    input, select {
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #0d1218;
+      color: var(--text);
+      margin-bottom: 0.65rem;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      margin-right: 0.5rem;
+      margin-top: 0.35rem;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-buy { background: rgba(52, 199, 89, 0.25); color: var(--buy); border: 1px solid var(--buy); }
+    .btn-sell { background: rgba(255, 159, 10, 0.2); color: var(--sell); border: 1px solid var(--sell); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      text-align: right;
+      padding: 0.45rem 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 600; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .tag-buy { color: var(--buy); }
+    .tag-sell { color: var(--sell); }
+    .tag-warn { color: var(--warn); }
+    .highlight-buy { box-shadow: inset 0 0 0 1px var(--buy); background: rgba(52, 199, 89, 0.08); }
+    .highlight-sell { box-shadow: inset 0 0 0 1px var(--sell); background: rgba(255, 159, 10, 0.08); }
+    .stat {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.65rem;
+      margin-top: 0.5rem;
+    }
+    .stat div {
+      background: #0d1218;
+      padding: 0.55rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .stat strong { display: block; font-size: 1.05rem; color: var(--text); }
+    .stat span { font-size: 0.75rem; color: var(--muted); }
+    .log {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+    }
+    .log li { margin-bottom: 0.35rem; list-style: none; padding-left: 0; }
+    .disclaimer {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 1.25rem;
+      opacity: 0.9;
+    }
+    .alert-bar {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      display: none;
+    }
+    .alert-bar.show { display: block; }
+    .alert-bar.info { background: rgba(61, 156, 245, 0.15); border: 1px solid var(--accent); }
+    .alert-bar.ok { background: rgba(52, 199, 89, 0.12); border: 1px solid var(--buy); }
+    .alert-bar.bad { background: rgba(255, 69, 58, 0.12); border: 1px solid var(--warn); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>分批加仓策略跟踪（经典版 · 仅手动填价）</h1>
+    <p class="sub">此为上一版界面备份。需要自动行情请打开 <code>stock-strategy-tracker.html</code>。</p>
+
+    <div id="alertBar" class="alert-bar"></div>
+
+    <div class="grid">
+      <section>
+        <h2>策略与标的</h2>
+        <label>股票名称</label>
+        <input type="text" id="stockName" value="金正大" />
+        <div class="row2">
+          <div>
+            <label>总预算（元）</label>
+            <input type="number" id="budget" value="49398" min="0" step="0.01" />
+          </div>
+          <div>
+            <label>参考 / 初始买入价（元）</label>
+            <input type="number" id="entryPrice" value="2.897" min="0.01" step="0.001" />
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>最小交易单位（股/手）</label>
+            <input type="number" id="lotSize" value="100" min="1" step="1" />
+          </div>
+          <div>
+            <label>加仓触发：相对上一笔成交价下跌（%）</label>
+            <input type="number" id="dropPct" value="20" min="0.1" step="0.1" />
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>减仓触发：相对持仓最低价反弹（%）</label>
+            <input type="number" id="bouncePct" value="5" min="0.1" step="0.1" />
+          </div>
+          <div>
+            <label>触发时卖出持仓比例（%）</label>
+            <input type="number" id="sellHalfPct" value="50" min="1" max="100" step="1" />
+          </div>
+        </div>
+        <label>今日现价（元，用于提醒）</label>
+        <input type="number" id="currentPrice" placeholder="输入当前价后点「检测提醒」" min="0" step="0.001" />
+        <button type="button" class="btn btn-primary" id="btnRecalc">重新计算计划表</button>
+        <button type="button" class="btn btn-secondary" id="btnCheck">检测提醒</button>
+        <button type="button" class="btn btn-secondary" id="btnNotify">请求浏览器通知权限</button>
+      </section>
+
+      <section>
+        <h2>当前持仓（由成交记录汇总）</h2>
+        <div class="stat" id="positionStats"></div>
+        <label>手动校正「持仓最低价」（元，用于卖点；默认取成交里的最低买入价）</label>
+        <input type="number" id="lowWater" placeholder="留空则自动" min="0" step="0.001" />
+        <p style="font-size:0.8rem;color:var(--muted);margin:0.5rem 0 0;">下一买点基于「上一笔买入价」；下一卖点基于「持仓最低价 × (1+反弹%)」。</p>
+        <button type="button" class="btn btn-buy" id="btnInitBuy">登记初始建仓（按预算与买入价）</button>
+        <div class="row2" style="margin-top:0.75rem;">
+          <div>
+            <label>加仓成交价（元）</label>
+            <input type="number" id="addPrice" min="0.01" step="0.001" />
+          </div>
+          <div>
+            <label>加仓股数（默认=当前持仓，翻倍）</label>
+            <input type="number" id="addShares" min="0" step="1" placeholder="自动" />
+          </div>
+        </div>
+        <button type="button" class="btn btn-buy" id="btnAdd">确认加仓成交</button>
+        <div class="row2" style="margin-top:0.75rem;">
+          <div>
+            <label>卖出成交价（元）</label>
+            <input type="number" id="sellPrice" min="0.01" step="0.001" />
+          </div>
+          <div>
+            <label>卖出股数（默认=可卖一半按手取整）</label>
+            <input type="number" id="sellShares" min="0" step="1" placeholder="自动" />
+          </div>
+        </div>
+        <button type="button" class="btn btn-sell" id="btnSell">确认卖出成交</button>
+        <button type="button" class="btn btn-secondary" id="btnUndo">撤销上一笔记录</button>
+        <button type="button" class="btn btn-secondary" id="btnClear">清空记录</button>
+        <ul class="log" id="ledger"></ul>
+      </section>
+    </div>
+
+    <section style="margin-top:1rem;">
+      <h2>计划表（假设每次恰好在触发价成交）</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>阶段</th>
+              <th>触发价（元）</th>
+              <th>操作</th>
+              <th>股数</th>
+              <th>金额（元）</th>
+              <th>累计持仓</th>
+              <th>累计投入（元）</th>
+              <th>摊薄后均价（元）</th>
+            </tr>
+          </thead>
+          <tbody id="planBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>下一笔提示</h2>
+      <div class="stat" id="nextHints"></div>
+    </section>
+
+    <p class="disclaimer">说明：本页仅为个人记账与价格提醒工具，不构成任何投资建议。A 股实际成交需满足交易所规则（如一手 100 股、T+1 等），请以自己券商为准。策略有放大亏损风险，请谨慎使用。</p>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "stock-strategy-tracker-v1";
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return { ledger: [] };
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    let state = loadState();
+
+    const $ = (id) => document.getElementById(id);
+
+    function roundLot(shares, lot) {
+      const l = Math.max(1, Math.floor(Number(lot) || 100));
+      return Math.floor(Math.max(0, shares) / l) * l;
+    }
+
+    function getInputs() {
+      return {
+        stockName: $("stockName").value.trim() || "股票",
+        budget: Number($("budget").value) || 0,
+        entryPrice: Number($("entryPrice").value) || 0,
+        lotSize: Math.max(1, Math.floor(Number($("lotSize").value) || 100)),
+        dropPct: Number($("dropPct").value) || 20,
+        bouncePct: Number($("bouncePct").value) || 5,
+        sellHalfPct: Math.min(100, Math.max(1, Number($("sellHalfPct").value) || 50)),
+        currentPrice: $("currentPrice").value === "" ? null : Number($("currentPrice").value),
+        lowWaterManual: $("lowWater").value === "" ? null : Number($("lowWater").value),
+      };
+    }
+
+    function aggregatePosition(ledger, lotSize) {
+      let shares = 0;
+      let costBasis = 0;
+      let minBuyPrice = null;
+      let lastBuyPrice = null;
+      for (const e of ledger) {
+        if (e.type === "buy") {
+          shares += e.shares;
+          costBasis += e.shares * e.price;
+          minBuyPrice = minBuyPrice == null ? e.price : Math.min(minBuyPrice, e.price);
+          lastBuyPrice = e.price;
+        } else if (e.type === "sell") {
+          const avg = shares > 0 ? costBasis / shares : 0;
+          shares -= e.shares;
+          costBasis -= avg * e.shares;
+          if (shares < 0) shares = 0;
+          if (costBasis < 0) costBasis = 0;
+        }
+      }
+      const avgPrice = shares > 0 ? costBasis / shares : 0;
+      return { shares, costBasis, minBuyPrice, lastBuyPrice, avgPrice };
+    }
+
+    function buildPlan(cfg) {
+      const { budget, entryPrice, lotSize, dropPct } = cfg;
+      if (budget <= 0 || entryPrice <= 0) return [];
+
+      const mult = 1 - dropPct / 100;
+      const initialShares = roundLot(budget / entryPrice, lotSize);
+      if (initialShares <= 0) return [];
+
+      const rows = [];
+      let totalShares = initialShares;
+      let totalCost = initialShares * entryPrice;
+      let refPrice = entryPrice;
+
+      rows.push({
+        stage: "初始",
+        triggerPrice: entryPrice,
+        action: "买入",
+        tradeShares: initialShares,
+        amount: totalCost,
+        totalShares,
+        totalCost,
+        avg: totalCost / totalShares,
+      });
+
+      const maxRows = 12;
+      for (let i = 1; i <= maxRows; i++) {
+        const trigger = refPrice * mult;
+        const toBuy = totalShares;
+        const lotBuy = roundLot(toBuy, lotSize);
+        if (lotBuy <= 0) break;
+        const amount = lotBuy * trigger;
+        totalShares += lotBuy;
+        totalCost += amount;
+        refPrice = trigger;
+        rows.push({
+          stage: `第${i}次加仓`,
+          triggerPrice: trigger,
+          action: "加仓（约一倍）",
+          tradeShares: lotBuy,
+          amount,
+          totalShares,
+          totalCost,
+          avg: totalCost / totalShares,
+        });
+        if (totalCost > budget * 3) {
+          rows[rows.length - 1].warn = "累计投入已远超初始预算，请注意资金规划";
+        }
+      }
+      return rows;
+    }
+
+    function nextBuyTrigger(lastBuyPrice, dropPct) {
+      if (lastBuyPrice == null || lastBuyPrice <= 0) return null;
+      const mult = 1 - dropPct / 100;
+      return lastBuyPrice * mult;
+    }
+
+    function nextSellTrigger(lowPrice, bouncePct) {
+      if (lowPrice == null || lowPrice <= 0) return null;
+      return lowPrice * (1 + bouncePct / 100);
+    }
+
+    function defaultSellShares(totalShares, sellPct, lotSize) {
+      const target = totalShares * (sellPct / 100);
+      return roundLot(target, lotSize);
+    }
+
+    function showAlert(msg, type) {
+      const bar = $("alertBar");
+      bar.className = "alert-bar show " + (type || "info");
+      bar.textContent = msg;
+    }
+
+    function hideAlert() {
+      $("alertBar").className = "alert-bar";
+    }
+
+    function renderPlan() {
+      const cfg = getInputs();
+      const body = $("planBody");
+      body.innerHTML = "";
+      const plan = buildPlan(cfg);
+      if (!plan.length) {
+        body.innerHTML = "<tr><td colspan='8' style='text-align:left;color:var(--muted)'>请检查预算、价格与一手股数，确保能买到至少一手。</td></tr>";
+        return;
+      }
+      for (const r of plan) {
+        const tr = document.createElement("tr");
+        if (r.warn) tr.title = r.warn;
+        tr.innerHTML = `
+          <td>${r.stage}</td>
+          <td>${r.triggerPrice.toFixed(3)}</td>
+          <td class="tag-buy">${r.action}</td>
+          <td>${r.tradeShares}</td>
+          <td>${r.amount.toFixed(2)}</td>
+          <td>${r.totalShares}</td>
+          <td>${r.totalCost.toFixed(2)}</td>
+          <td>${r.avg.toFixed(3)}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }
+
+    function renderLedger() {
+      const cfg = getInputs();
+      const ul = $("ledger");
+      ul.innerHTML = "";
+      if (!state.ledger.length) {
+        ul.innerHTML = "<li>暂无成交记录。可点「登记初始建仓」。</li>";
+      } else {
+        state.ledger.forEach((e, i) => {
+          const li = document.createElement("li");
+          const sign = e.type === "buy" ? "+" : "−";
+          const cls = e.type === "buy" ? "tag-buy" : "tag-sell";
+          li.innerHTML = `<span class="${cls}">${i + 1}. ${e.type === "buy" ? "买" : "卖"} ${sign}${e.shares} 股 @ ${e.price.toFixed(3)} 元（约 ${(e.shares * e.price).toFixed(2)} 元）</span>`;
+          ul.appendChild(li);
+        });
+      }
+
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const stats = $("positionStats");
+      stats.innerHTML = `
+        <div><span>持仓股数</span><strong>${pos.shares}</strong></div>
+        <div><span>持仓成本（元）</span><strong>${pos.costBasis.toFixed(2)}</strong></div>
+        <div><span>摊薄均价（元）</span><strong>${pos.shares > 0 ? pos.avgPrice.toFixed(3) : "—"}</strong></div>
+        <div><span>上一笔买入价</span><strong>${pos.lastBuyPrice != null ? pos.lastBuyPrice.toFixed(3) : "—"}</strong></div>
+      `;
+
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0
+        ? cfg.lowWaterManual
+        : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+      const sellShares = pos.shares > 0 ? defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize) : 0;
+      const sellAmt = ns != null && sellShares > 0 ? sellShares * ns : 0;
+
+      const hints = $("nextHints");
+      hints.innerHTML = `
+        <div><span>下一加仓触发价（元）</span><strong>${nb != null ? nb.toFixed(3) : "—"}</strong></div>
+        <div><span>若触发，建议买入股数（翻倍）</span><strong>${pos.shares > 0 ? pos.shares : "—"}</strong></div>
+        <div><span>该笔约需资金（元）</span><strong>${nb != null && pos.shares > 0 ? (roundLot(pos.shares, cfg.lotSize) * nb).toFixed(2) : "—"}</strong></div>
+        <div><span>持仓最低价参考（元）</span><strong>${low != null ? low.toFixed(3) : "—"}</strong></div>
+        <div><span>减仓触发价（反弹，元）</span><strong>${ns != null ? ns.toFixed(3) : "—"}</strong></div>
+        <div><span>触发时可卖股数（${cfg.sellHalfPct}% 向下取整手）</span><strong>${sellShares || "—"}</strong></div>
+        <div><span>按触发价估算回笼（元）</span><strong>${sellAmt ? sellAmt.toFixed(2) : "—"}</strong></div>
+      `;
+    }
+
+    function maybeNotify(title, body) {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      new Notification(title, { body });
+    }
+
+    function checkPriceAlerts() {
+      const cfg = getInputs();
+      const p = cfg.currentPrice;
+      if (p == null || p <= 0) {
+        showAlert("请先填写「今日现价」再检测。", "bad");
+        return;
+      }
+      hideAlert();
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0
+        ? cfg.lowWaterManual
+        : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+
+      let msg = "";
+      if (pos.shares <= 0) {
+        msg = "当前无持仓记录，请先登记建仓。";
+        showAlert(msg, "info");
+        return;
+      }
+      const rows = document.querySelectorAll("#planBody tr");
+      rows.forEach((r) => r.classList.remove("highlight-buy", "highlight-sell"));
+
+      if (nb != null && p <= nb) {
+        const lotBuy = roundLot(pos.shares, cfg.lotSize);
+        msg = `价格 ${p.toFixed(3)} 已达到或低于下一加仓参考价 ${nb.toFixed(3)}，若按策略可考虑买入约 ${lotBuy} 股（约 ${(lotBuy * p).toFixed(2)} 元）。`;
+        showAlert(msg, "ok");
+        maybeNotify(cfg.stockName + " · 加仓参考", msg);
+        return;
+      }
+      if (ns != null && p >= ns) {
+        const ss = defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize);
+        msg = `价格 ${p.toFixed(3)} 已达到或高于减仓参考价 ${ns.toFixed(3)}，若按策略可考虑卖出约 ${ss} 股（约 ${(ss * p).toFixed(2)} 元）。`;
+        showAlert(msg, "ok");
+        maybeNotify(cfg.stockName + " · 减仓参考", msg);
+        return;
+      }
+
+      if (nb != null && ns != null) {
+        msg = `现价 ${p.toFixed(3)} 介于加仓参考 ${nb.toFixed(3)} 与减仓参考 ${ns.toFixed(3)} 之间，暂无策略触达。`;
+      } else {
+        msg = "暂无法计算下一触发价（请确认已有买入记录与最低价）。";
+      }
+      showAlert(msg, "info");
+    }
+
+    function initBuy() {
+      const cfg = getInputs();
+      if (cfg.budget <= 0 || cfg.entryPrice <= 0) {
+        showAlert("请填写预算与买入价。", "bad");
+        return;
+      }
+      const shares = roundLot(cfg.budget / cfg.entryPrice, cfg.lotSize);
+      if (shares <= 0) {
+        showAlert("按当前价格与一手规则，预算不足以买入一手。", "bad");
+        return;
+      }
+      state.ledger = [{ type: "buy", shares, price: cfg.entryPrice }];
+      saveState(state);
+      renderLedger();
+      showAlert(`已登记初始建仓：${shares} 股 @ ${cfg.entryPrice.toFixed(3)} 元。`, "ok");
+    }
+
+    function addBuy() {
+      const cfg = getInputs();
+      const price = Number($("addPrice").value);
+      if (!(price > 0)) {
+        showAlert("请填写加仓成交价。", "bad");
+        return;
+      }
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      let shares = $("addShares").value === "" ? pos.shares : Number($("addShares").value);
+      shares = roundLot(shares, cfg.lotSize);
+      if (shares <= 0) {
+        showAlert("加仓股数无效。", "bad");
+        return;
+      }
+      state.ledger.push({ type: "buy", shares, price });
+      saveState(state);
+      $("addPrice").value = "";
+      $("addShares").value = "";
+      renderLedger();
+      showAlert(`已记录加仓：${shares} 股 @ ${price.toFixed(3)} 元。`, "ok");
+    }
+
+    function doSell() {
+      const cfg = getInputs();
+      const price = Number($("sellPrice").value);
+      if (!(price > 0)) {
+        showAlert("请填写卖出成交价。", "bad");
+        return;
+      }
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      let shares = $("sellShares").value === "" ? defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize) : Number($("sellShares").value);
+      shares = roundLot(shares, cfg.lotSize);
+      if (shares <= 0 || shares > pos.shares) {
+        showAlert("卖出股数无效或超过持仓。", "bad");
+        return;
+      }
+      state.ledger.push({ type: "sell", shares, price });
+      saveState(state);
+      $("sellPrice").value = "";
+      $("sellShares").value = "";
+      renderLedger();
+      showAlert(`已记录卖出：${shares} 股 @ ${price.toFixed(3)} 元（约回笼 ${(shares * price).toFixed(2)} 元）。`, "ok");
+    }
+
+    function undo() {
+      if (!state.ledger.length) return;
+      state.ledger.pop();
+      saveState(state);
+      renderLedger();
+      showAlert("已撤销上一笔记录。", "info");
+    }
+
+    function clearAll() {
+      if (!confirm("确定清空所有成交记录？（参数不会清空）")) return;
+      state.ledger = [];
+      saveState(state);
+      renderLedger();
+      showAlert("已清空记录。", "info");
+    }
+
+    function requestNotify() {
+      if (!("Notification" in window)) {
+        showAlert("当前浏览器不支持通知。", "bad");
+        return;
+      }
+      Notification.requestPermission().then((p) => {
+        showAlert(p === "granted" ? "已开启通知，检测提醒时可弹出系统通知。" : "未授予通知权限。", p === "granted" ? "ok" : "info");
+      });
+    }
+
+    $("btnRecalc").addEventListener("click", () => {
+      renderPlan();
+      renderLedger();
+      hideAlert();
+    });
+    $("btnCheck").addEventListener("click", checkPriceAlerts);
+    $("btnNotify").addEventListener("click", requestNotify);
+    $("btnInitBuy").addEventListener("click", initBuy);
+    $("btnAdd").addEventListener("click", addBuy);
+    $("btnSell").addEventListener("click", doSell);
+    $("btnUndo").addEventListener("click", undo);
+    $("btnClear").addEventListener("click", clearAll);
+
+    ["budget", "entryPrice", "lotSize", "dropPct", "bouncePct", "sellHalfPct", "lowWater"].forEach((id) => {
+      $(id).addEventListener("change", () => {
+        renderPlan();
+        renderLedger();
+      });
+    });
+
+    renderPlan();
+    renderLedger();
+  </script>
+</body>
+</html>

@@ -1,0 +1,4526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>分批加仓跟踪 v1.1（自动行情）</title>
+  <script>
+    (function () {
+      var urls = [
+        "https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js",
+        "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js",
+      ];
+      var i = 0;
+      function next() {
+        if (typeof LightweightCharts !== "undefined") return;
+        if (i >= urls.length) return;
+        var s = document.createElement("script");
+        s.src = urls[i++];
+        s.async = true;
+        s.onerror = next;
+        s.onload = function () {
+          if (typeof LightweightCharts === "undefined") next();
+        };
+        document.head.appendChild(s);
+      }
+      next();
+    })();
+  </script>
+  <style>
+    :root {
+      --bg: #080b10;
+      --panel: #121826;
+      --panel2: #0e131c;
+      --border: #243044;
+      --text: #f0f4fa;
+      --muted: #7a8aa0;
+      --accent: #5eb0ff;
+      --buy: #3ddc84;
+      --sell: #ffb020;
+      --warn: #ff5c5c;
+      --radius: 14px;
+      --font: "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      padding: 0;
+    }
+    .app-shell {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 1rem 1rem 2rem;
+    }
+    .watch-sidebar {
+      flex: 0 0 300px;
+      position: sticky;
+      top: 0.75rem;
+      align-self: flex-start;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 0.65rem 0.65rem;
+      max-height: calc(100vh - 1.5rem);
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .watch-sidebar h2 {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 0 0 0.35rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .watch-sidebar-hint {
+      font-size: 0.68rem;
+      color: var(--muted);
+      line-height: 1.35;
+      margin: 0 0 0.5rem;
+    }
+    .watch-card-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      flex: 1;
+      min-height: 0;
+      align-items: stretch;
+      padding-right: 4px;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+    }
+    .watch-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      overflow: hidden;
+      min-height: calc(7.35rem + 9px);
+      transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease, border-color 0.2s ease;
+    }
+    .watch-card.watch-card--active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(94, 176, 255, 0.35);
+    }
+    .watch-card.watch-card--dragging {
+      transition: none !important;
+      z-index: 20;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+      opacity: 0.96;
+    }
+    .watch-card.watch-card--snap {
+      animation: watchCardSnap 0.42s cubic-bezier(0.34, 1.2, 0.64, 1);
+    }
+    @keyframes watchCardSnap {
+      0% { transform: scale(1); }
+      35% { transform: scale(1.03); }
+      100% { transform: scale(1); }
+    }
+    .watch-card-strip {
+      height: 7px;
+      width: 100%;
+      flex-shrink: 0;
+      background: rgba(122, 138, 160, 0.35);
+      transition: background 0.35s ease;
+    }
+    .watch-card-strip.up {
+      background: linear-gradient(90deg, #ff5c5c, #ff8585);
+    }
+    .watch-card-strip.down {
+      background: linear-gradient(90deg, #1fa855, #3ddc84);
+    }
+    .watch-card-strip.flat {
+      background: rgba(122, 138, 160, 0.45);
+    }
+    .watch-card-inner {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      flex-shrink: 0;
+      flex-grow: 0;
+      min-height: 7.35rem;
+    }
+    .watch-card-grip {
+      flex: 0 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1;
+      user-select: none;
+      background: rgba(0, 0, 0, 0.2);
+      border-right: 1px solid var(--border);
+    }
+    .watch-card-grip:active { cursor: grabbing; }
+    .watch-card-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 0.52rem 0.5rem 0.48rem;
+      cursor: pointer;
+      text-align: left;
+    }
+    .watch-card-main:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+    .watch-card-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.95fr);
+      grid-template-rows: auto auto auto;
+      column-gap: 0.45rem;
+      row-gap: 0.28rem;
+      align-items: start;
+    }
+    .watch-card-grid .wc-l1 {
+      grid-column: 1;
+      grid-row: 1;
+      min-width: 0;
+    }
+    .watch-card-grid .wc-r1 {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .watch-card-grid .wc-l2 {
+      grid-column: 1;
+      grid-row: 2;
+      min-width: 0;
+    }
+    .watch-card-grid .wc-r2 {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .watch-card-grid .wc-l3 {
+      grid-column: 1;
+      grid-row: 3;
+      align-self: end;
+      min-width: 0;
+      padding-top: 0.12rem;
+    }
+    .watch-card-grid .wc-r3 {
+      grid-column: 2;
+      grid-row: 3;
+      align-self: end;
+    }
+    .wc-r1,
+    .wc-r2,
+    .wc-r3 {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: flex-start;
+      gap: 0.05rem;
+      min-width: 0;
+    }
+    .wc-meta-lbl {
+      font-size: 0.58rem;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .wc-meta-val {
+      font-size: 0.76rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+    .wc-meta-val.tong-profit {
+      color: #ff4d55;
+    }
+    .wc-meta-val.tong-loss {
+      color: #3d8cff;
+    }
+    .wc-meta-val.tong-flat {
+      color: var(--muted);
+    }
+    .wc-price-big {
+      font-size: clamp(1.2rem, 4.8vw, 1.62rem);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      line-height: 1.05;
+    }
+    .wc-price-unit {
+      font-size: 0.58rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-left: 0.1em;
+      vertical-align: 0.12em;
+    }
+    .wc-pct-chg {
+      font-size: 0.82rem;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.15;
+    }
+    .wc-pct-chg.a-up {
+      color: #ff4d55;
+    }
+    .wc-pct-chg.a-down {
+      color: #3ddc84;
+    }
+    .wc-pct-chg.a-flat {
+      color: var(--muted);
+    }
+    .watch-card-title {
+      font-size: 0.88rem;
+      font-weight: 650;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.2;
+    }
+    .watch-card-code {
+      font-family: ui-monospace, monospace;
+      font-size: 0.72rem;
+      color: var(--accent);
+      line-height: 1.2;
+    }
+    .watch-sidebar-actions {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      margin-top: 0.55rem;
+      padding-top: 0.55rem;
+      border-top: 1px solid var(--border);
+    }
+    .watch-sidebar-actions .btn {
+      width: 100%;
+      justify-content: center;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.5rem;
+    }
+    .wrap {
+      flex: 1;
+      min-width: 0;
+      max-width: none;
+      padding-top: 0;
+    }
+    .chart-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .chart-wrap h2 { margin-top: 0; }
+    .k-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.65rem;
+      touch-action: manipulation;
+      user-select: none;
+    }
+    .k-tabs button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+    .k-tabs button.active { background: var(--accent); color: #0a1628; border-color: var(--accent); }
+    #chartMain, #chartMacd {
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+      touch-action: pan-x pan-y pinch-zoom;
+    }
+    #chartMain { height: 280px; }
+    #chartMacd { height: 140px; margin-top: 0.5rem; }
+    .chart-meta { font-size: 0.72rem; color: var(--muted); margin-top: 0.35rem; }
+    .pnl-panel .pnl-big { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pnl-panel .pnl-up { color: var(--buy); }
+    .pnl-panel .pnl-down { color: var(--warn); }
+    .fee-note { font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; line-height: 1.45; }
+    table.t-advice td:nth-child(3) { font-weight: 600; }
+    .news-item { border-bottom: 1px solid var(--border); padding: 0.65rem 0; }
+    .news-item summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; list-style: none; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+    .news-item summary::-webkit-details-marker { display: none; }
+    .sent-badge { font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 4px; }
+    .sent-pos { background: rgba(61,220,132,0.2); color: var(--buy); }
+    .sent-neg { background: rgba(255,92,92,0.2); color: var(--warn); }
+    .sent-neu { background: rgba(122,138,160,0.25); color: var(--muted); }
+    .news-body { font-size: 0.8rem; color: var(--muted); margin-top: 0.45rem; white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
+    .news-cat-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0.65rem 0 0.5rem;
+    }
+    .news-cat-tabs button {
+      padding: 0.3rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .news-cat-tabs button.active { background: var(--accent); color: #0a1628; border-color: var(--accent); }
+    .impact-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 0.12rem 0.4rem;
+      border-radius: 4px;
+      margin-right: 0.25rem;
+    }
+    .impact-pos { background: rgba(61, 220, 132, 0.25); color: var(--buy); }
+    .impact-neg { background: rgba(255, 92, 92, 0.25); color: var(--warn); }
+    .impact-neu { background: rgba(122, 138, 160, 0.3); color: var(--muted); }
+    .src-chip { font-size: 0.65rem; color: var(--accent); margin-left: 0.35rem; }
+    .news-pagination {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem 0.65rem;
+      margin-top: 0.75rem;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel2);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .news-pagination .pg-meta { color: var(--text); margin-right: 0.25rem; }
+    .news-pagination .pg-btns { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.2rem; }
+    .news-pagination button.pg-btn {
+      min-width: 2rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .news-pagination button.pg-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .news-pagination button.pg-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .news-pagination button.pg-btn.pg-active {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(94, 176, 255, 0.35);
+    }
+    .news-pagination select.pg-size {
+      padding: 0.2rem 0.35rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 0.75rem;
+    }
+    .news-pagination input.pg-jump {
+      width: 3rem;
+      padding: 0.2rem 0.35rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.75rem;
+    }
+    .web-tag-bar { line-height: 1.55; }
+    .web-tag-chip {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.15rem 0.45rem;
+      margin: 0.12rem 0.25rem 0 0;
+      border-radius: 6px;
+      background: rgba(94, 176, 255, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(94, 176, 255, 0.35);
+    }
+    .news-highrisk-box {
+      border: 1px solid rgba(255, 92, 92, 0.45);
+      border-radius: var(--radius);
+      background: rgba(255, 92, 92, 0.06);
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .news-highrisk-box h4 { margin: 0 0 0.4rem; font-size: 0.82rem; color: var(--warn); }
+    .news-highrisk-box ul { margin: 0; padding-left: 1.1rem; font-size: 0.78rem; color: var(--text); }
+    .news-highrisk-box li { margin: 0.25rem 0; }
+    .bp-row { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-bottom: 0.35rem; font-size: 0.82rem; }
+
+    /* —— 顶部行情大卡 —— */
+    .hero {
+      position: relative;
+      border-radius: calc(var(--radius) + 4px);
+      padding: 1.25rem 1.35rem 1.1rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(145deg, #152238 0%, #0d1522 45%, #0a1018 100%);
+      border: 1px solid #2a3f5c;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .hero-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .hero-title {
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-weight: 500;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.35rem 0.65rem;
+    }
+    .hero-title strong {
+      color: var(--text);
+      font-size: clamp(1.05rem, 2.8vw, 1.35rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .hero-code-row {
+      font-size: 0.88rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .hero-code-row .hero-code {
+      margin-left: 0.25rem;
+    }
+    .hero-code { font-family: ui-monospace, monospace; color: var(--accent); font-size: 0.9rem; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+    .hero-price-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.75rem 1.25rem;
+    }
+    .price-big {
+      font-size: clamp(2.4rem, 8vw, 3.25rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .price-big .unit { font-size: 0.45em; font-weight: 600; color: var(--muted); margin-left: 0.15em; }
+    .chg-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .chg-pill.up { background: rgba(61, 220, 132, 0.18); color: var(--buy); }
+    .chg-pill.down { background: rgba(255, 92, 92, 0.18); color: var(--warn); }
+    .chg-pill.flat { background: rgba(122, 138, 160, 0.2); color: var(--muted); }
+    .hero-meta { font-size: 0.78rem; color: var(--muted); margin-top: 0.65rem; }
+    .hero-meta .err { color: var(--warn); }
+
+    /* —— 策略状态条 —— */
+    .signal {
+      border-radius: var(--radius);
+      padding: 1rem 1.15rem;
+      margin-bottom: 1rem;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .signal.state-watch { border-left: 4px solid var(--accent); }
+    .signal.state-near-buy { border-left: 4px solid var(--buy); background: linear-gradient(90deg, rgba(61,220,132,0.08) 0%, var(--panel) 55%); }
+    .signal.state-near-sell { border-left: 4px solid var(--sell); background: linear-gradient(90deg, rgba(255,176,32,0.1) 0%, var(--panel) 55%); }
+    .signal.state-hit-buy { border-left: 4px solid var(--buy); box-shadow: 0 0 0 1px rgba(61,220,132,0.35); }
+    .signal.state-hit-sell { border-left: 4px solid var(--sell); box-shadow: 0 0 0 1px rgba(255,176,32,0.35); }
+    .signal.state-idle { border-left: 4px solid #4a5568; }
+    .signal h3 { margin: 0 0 0.35rem; font-size: 1.05rem; font-weight: 650; }
+    .signal p { margin: 0; font-size: 0.88rem; color: var(--muted); }
+    .bar-track {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--panel2);
+      margin-top: 0.75rem;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.35s ease;
+      background: linear-gradient(90deg, var(--buy), var(--accent));
+    }
+
+    .grid2 {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    }
+    section, .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.15rem;
+    }
+    section h2, .card h2 {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 0 0 0.75rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .kv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+    }
+    .kv {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }
+    .kv .k { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.2rem; }
+    .kv .v { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .kv .v.sm { font-size: 1.05rem; font-weight: 650; }
+    .kv.buy-zone .v { color: var(--buy); }
+    .kv.sell-zone .v { color: var(--sell); }
+
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
+    input, select, button { font-family: inherit; font-size: 0.9rem; }
+    input, select {
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--text);
+      margin-bottom: 0.55rem;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.5rem 0.9rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      margin: 0.25rem 0.4rem 0 0;
+    }
+    .btn-primary { background: var(--accent); color: #0a1628; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-buy { background: rgba(61, 220, 132, 0.2); color: var(--buy); border: 1px solid var(--buy); }
+    .btn-sell { background: rgba(255, 176, 32, 0.15); color: var(--sell); border: 1px solid var(--sell); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .chk-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; font-size: 0.85rem; color: var(--muted); }
+    .chk-row input { width: auto; margin: 0; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td { text-align: right; padding: 0.5rem 0.35rem; border-bottom: 1px solid var(--border); }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.72rem; }
+    tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .tag-buy { color: var(--buy); }
+    .tag-sell { color: var(--sell); }
+
+    .stat {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+    }
+    .stat div {
+      background: var(--panel2);
+      padding: 0.5rem 0.55rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .stat strong { display: block; font-size: 0.98rem; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 0.7rem; color: var(--muted); }
+
+    .log {
+      max-height: 180px;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.45rem;
+      padding-left: 0;
+    }
+    .log li { margin-bottom: 0.3rem; list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+
+    .alert-bar {
+      padding: 0.65rem 0.85rem;
+      border-radius: 10px;
+      margin-bottom: 0.85rem;
+      font-size: 0.82rem;
+      display: none;
+    }
+    .alert-bar.show { display: block; }
+    .alert-bar.info { background: rgba(94, 176, 255, 0.12); border: 1px solid var(--accent); }
+    .alert-bar.ok { background: rgba(61, 220, 132, 0.1); border: 1px solid var(--buy); }
+    .alert-bar.bad { background: rgba(255, 92, 92, 0.1); border: 1px solid var(--warn); }
+
+    .section-intro {
+      font-size: 0.78rem;
+      line-height: 1.62;
+      color: var(--muted);
+      margin: 0 0 0.65rem;
+      padding: 0.55rem 0.65rem 0.55rem 0.75rem;
+      border-left: 3px solid var(--accent);
+      background: rgba(94, 176, 255, 0.09);
+      border-radius: 0 10px 10px 0;
+    }
+    .section-intro strong.il-h {
+      display: inline-block;
+      min-width: 3.35rem;
+      color: var(--accent);
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      font-weight: 700;
+    }
+    .section-intro strong:not(.il-h) {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .page-overview.section-intro {
+      border-left-width: 4px;
+      background: rgba(94, 176, 255, 0.12);
+    }
+    .section-intro-wrap {
+      margin-bottom: 0.65rem;
+    }
+    .section-intro-wrap .intro-toggle-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 0.15rem;
+    }
+    .section-intro-wrap .section-intro-toolbar-target .section-intro {
+      margin-bottom: 0;
+    }
+    .section-intro-wrap.intro-collapsed .section-intro-toolbar-target {
+      display: none;
+    }
+    .btn-intro-toggle {
+      font-size: 0.68rem;
+      font-weight: 500;
+      color: var(--accent);
+      background: transparent;
+      border: 1px solid rgba(94, 176, 255, 0.45);
+      border-radius: 6px;
+      padding: 0.1rem 0.38rem;
+      cursor: pointer;
+      line-height: 1.35;
+    }
+    .btn-intro-toggle:hover {
+      background: rgba(94, 176, 255, 0.12);
+      color: var(--text);
+    }
+    .disclaimer {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 1.25rem;
+      line-height: 1.5;
+    }
+    details.param-details summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.35rem 0;
+    }
+    .mini-link { font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; }
+    .mini-link a { color: var(--accent); }
+    .kv-head-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .pct-chip {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .pct-chip.buy { background: rgba(61, 220, 132, 0.2); color: var(--buy); }
+    .pct-chip.sell { background: rgba(255, 176, 32, 0.2); color: var(--sell); }
+    .plan-params-grid .row2 { margin-bottom: 0.45rem; }
+    .ledger-del { font-size: 0.72rem; padding: 0.2rem 0.45rem; margin-left: 0.35rem; }
+    @media (max-width: 900px) {
+      .app-shell {
+        flex-direction: column;
+      }
+      .watch-sidebar {
+        position: relative;
+        top: 0;
+        max-height: none;
+        width: 100%;
+        flex: none;
+      }
+      .watch-card-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="watch-sidebar" aria-label="自选股票卡片">
+      <h2>自选卡片</h2>
+      <div class="section-intro-wrap" data-intro-key="watch">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>同时关注最多 50 只股票，每格独立保存持仓、成交、新闻等快照，互不混用；左侧列表可上下滑动浏览。<br />
+            <strong class="il-h">用法</strong>点某格卡片即切换到该标的；在右侧「标的与现价来源」填 6 位代码与公司名。左侧把手拖动可调整卡片顺序。「添加至空位」把当前填写代码放入第一个空位；「删除当前格」清空当前格并切到该空位。<br />
+            <strong class="il-h">可实现</strong>多标的轮看、排序整理、与主区行情/K 线/新闻联动（始终对应当前选中的那一格）。
+          </p>
+        </div>
+      </div>
+      <div id="watchCardList" class="watch-card-list"></div>
+      <div class="watch-sidebar-actions">
+        <button type="button" class="btn btn-secondary" id="btnWatchAdd">添加至空位</button>
+        <button type="button" class="btn btn-ghost" id="btnWatchDelete">删除当前格</button>
+      </div>
+    </aside>
+    <div class="wrap">
+    <div class="section-intro-wrap" data-intro-key="page">
+      <div class="intro-toggle-row">
+        <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+      </div>
+      <div class="section-intro-toolbar-target">
+        <div class="section-intro page-overview">
+          <strong style="color: var(--text); font-size: 0.84rem; display: block; margin-bottom: 0.35rem">整页是做什么的？</strong>
+          <strong class="il-h">作用</strong>在浏览器里完成「<strong>自选多股 → 自动/手动行情 → K 线与 MACD → 分批加仓计划与记账 → 费用与目标价测算 → 公告与网页新闻</strong>」一条龙跟踪；数据存在本机，换电脑需重新录入。<br />
+          <strong class="il-h">用法</strong>建议顺序：<strong>①</strong>左侧点选股票卡片；<strong>②</strong>「标的与现价来源」填代码与预算；<strong>③</strong>「成交记录」登记建仓；<strong>④</strong>「计划表 · 策略参数」按你的纪律改跌幅/倍数等；<strong>⑤</strong>看「策略状态」「关键价位」与上方费用区；需要时拉新闻、设新闻统计参数。<br />
+          <strong class="il-h">可实现</strong>多标的独立快照、秒级行情刷新、本地新闻库与分页导出、技术面/新闻结论记入「胜率统计」做事后机械复盘（非投资建议）。
+        </div>
+      </div>
+    </div>
+    <div class="hero" id="hero">
+      <div class="section-intro-wrap" data-intro-key="hero">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>用大字号展示<strong>当前自选标的</strong>的实时价、涨跌幅与行情来源，作为全页策略与盈亏的「现价基准」。<br />
+            <strong class="il-h">用法</strong>勾选「自动刷新」并选择间隔（秒级可选），或点「立即刷新行情」手动更新。断网或对账时可勾「用手动价格覆盖」并在下方填现价。<br />
+            <strong class="il-h">可实现</strong>与计划表、关键价位、费用测算、K 线、新闻情绪等<strong>同一现价口径</strong>；自选侧栏卡片显示现价、当日涨跌幅，以及按该格成交快照估算的当日盈亏与持仓总盈亏（红盈蓝亏，参考常见交易端展示习惯）。
+          </p>
+        </div>
+      </div>
+      <div class="hero-top">
+        <div>
+          <div class="hero-title">
+            <strong id="heroName">金正大</strong>
+            <span class="hero-code-row"><span id="heroCode6">002470</span> <span class="hero-code" id="heroListId">sz002470</span></span>
+          </div>
+          <div class="hero-meta" id="heroMeta">加载行情中…</div>
+        </div>
+        <div class="hero-actions">
+          <label class="chk-row" style="margin:0;"><input type="checkbox" id="autoRefresh" checked /> 自动刷新</label>
+          <select id="refreshSec" style="width:auto;margin:0;padding:0.35rem 0.5rem;">
+            <option value="1">1 秒</option>
+            <option value="2">2 秒</option>
+            <option value="3">3 秒</option>
+            <option value="5">5 秒</option>
+            <option value="10" selected>10 秒</option>
+            <option value="15">15 秒</option>
+            <option value="20">20 秒</option>
+            <option value="30">30 秒</option>
+            <option value="45">45 秒</option>
+            <option value="60">60 秒</option>
+            <option value="90">90 秒</option>
+            <option value="120">120 秒</option>
+          </select>
+          <button type="button" class="btn btn-primary" id="btnRefreshQuote">立即刷新行情</button>
+        </div>
+      </div>
+      <div class="hero-price-row">
+        <div class="price-big" id="heroPrice">—<span class="unit">元</span></div>
+        <div class="chg-pill flat" id="heroChg">—</div>
+      </div>
+      <div class="hero-meta" id="heroHint">行情来自公开接口（腾讯优先、新浪备用），仅供展示；成交价以券商为准。</div>
+    </div>
+
+    <div class="chart-wrap" id="chartWrap">
+      <h2>K 线 · MACD（与现价同步刷新 · 分钟为实时更新）</h2>
+      <div class="section-intro-wrap" data-intro-key="chart">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>查看当前标的的价格走势与 MACD 柱状/线，辅助判断短线动能；数据随行情刷新，分钟线贴近盘中。<br />
+            <strong class="il-h">用法</strong>用上方 Tab 切换 1 分、5 分、日、周、月。在<strong>当前周期内</strong>左右拖动平移时间；鼠标滚轮或双指张捏在<strong>本周期内</strong>缩放 K 线疏密。下方可一键把「技术面文字结论」记入胜率统计（需有效现价）。<br />
+            <strong class="il-h">可实现</strong>多周期对照、与现价同源刷新、规则化 MACD 提示（非投资建议）；K 线来源在图下灰色说明中展示。
+          </p>
+        </div>
+      </div>
+      <div class="k-tabs" id="klineTabs">
+        <button type="button" data-period="m1">1 分钟（实时）</button>
+        <button type="button" data-period="m5">5 分钟</button>
+        <button type="button" data-period="day" class="active">日 K</button>
+        <button type="button" data-period="week">周 K</button>
+        <button type="button" data-period="month">月 K</button>
+      </div>
+      <div id="chartMain"></div>
+      <div id="chartMacd"></div>
+      <div class="chart-meta" id="chartMeta">加载 K 线中…</div>
+      <p class="chart-meta" id="techAdvice" style="margin-top:0.5rem;color:var(--text);"></p>
+      <button type="button" class="btn btn-ghost" id="btnRecordTech" style="margin-top:0.35rem;">将当前技术面结论记入胜率统计（按侧栏规则判定）</button>
+    </div>
+
+    <section class="pnl-panel" style="margin-bottom:1rem;">
+      <h2>费用 · 盈亏 · 5% 净利目标价（测算）</h2>
+      <div class="section-intro-wrap" data-intro-key="pnl">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>按页面内置费率模型，估算持仓市值、浮动盈亏、若<strong>现价一次性全卖</strong>的净回笼与收益率，并反推「净利达到你设定目标比例」时的理论卖价。<br />
+            <strong class="il-h">用法</strong>先登记成交与现价（或自动行情）。目标净利比例在下方「计划表 · 策略参数」里修改；本区会随现价与持仓自动重算。<br />
+            <strong class="il-h">可实现</strong>快速对照券商费率、看在「扣卖出侧费用」后离心理目标价还有多远；数字为测算，以交割单为准。
+          </p>
+        </div>
+      </div>
+      <div class="fee-note" style="margin-bottom:0.75rem;">
+        费用模型（你可与券商对账）：佣金 <strong>万 3</strong> 且<strong>单笔不足 5 元按 5 元</strong>；卖出<strong>印花税 0.5‰</strong>；<strong>过户费 0.01‰</strong>（按成交金额）。买入侧：佣+过户；卖出侧：佣+印花税+过户。
+      </div>
+      <div class="grid2" style="margin:0;">
+        <div class="kv">
+          <div class="k">持仓市值（现价×股数）</div>
+          <div class="v sm" id="pnlMktVal">—</div>
+          <div class="k" style="margin-top:0.5rem">浮动盈亏（名义，未扣卖出费用）</div>
+          <div class="pnl-big" id="pnlFloat">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">若现价全额卖出 · 净回笼（已扣卖出侧费用）</div>
+          <div class="v sm" id="pnlNetSell">—</div>
+          <div class="k" style="margin-top:0.5rem">相对名义成本收益率</div>
+          <div class="pnl-big" id="pnlNetPct">—</div>
+        </div>
+      </div>
+      <div class="kv" style="margin-top:0.65rem;">
+        <div class="k">目标：卖出侧扣费后，相对名义持仓成本<strong>净利 +<span id="pnlTargetPctLabel">5</span>%</strong> 所需的卖出价（全仓一次性卖出假设，比例见下方「目标净利%」）</div>
+        <div class="v sm" id="pnlTarget5">—</div>
+        <div class="k" style="margin-top:0.5rem">从现价到该目标需反弹（下跌为负）</div>
+        <div class="v" id="pnlReboundPct">—</div>
+      </div>
+      <p class="fee-note">说明：名义成本来自你登记的成交记录（买入金额合计，未含历史买入佣金）。目标净利比例在下方「计划表 · 策略参数」里可调；测算分母用当前 <code>持仓成本</code>。</p>
+    </section>
+
+    <div id="alertBar" class="alert-bar"></div>
+
+    <div class="signal state-watch" id="signalBox">
+      <div class="section-intro-wrap" data-intro-key="signal">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro" style="margin-bottom:0.65rem;border-left-color:var(--sell);background:rgba(255,176,32,0.06);">
+            <strong class="il-h">作用</strong>用一句话告诉你：相对「下一加仓参考价」「减仓参考价」，现价落在哪个区间，并给出偏加仓/偏减仓/观望的<strong>文字提示</strong>（非下单指令）。<br />
+            <strong class="il-h">用法</strong>依赖你已登记的买入与持仓、以及当前现价。触及「加仓区」「减仓区」时可能触发浏览器<strong>系统通知</strong>（需先点「系统通知权限」授权）。<br />
+            <strong class="il-h">可实现</strong>盘中扫一眼就知道离下一档计划价有多远；与下方关键价位、计划表数字一致。
+          </p>
+        </div>
+      </div>
+      <h3 id="signalTitle">策略状态</h3>
+      <p id="signalDesc">请先登记建仓并等待行情返回。</p>
+      <div class="bar-track"><div class="bar-fill" id="signalBar" style="width:0%"></div></div>
+    </div>
+
+    <div class="grid2" style="margin-bottom:1rem;">
+      <section>
+        <h2>关键价位（下一笔）</h2>
+        <div class="section-intro-wrap" data-intro-key="key-levels">
+          <div class="intro-toggle-row">
+            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          </div>
+          <div class="section-intro-toolbar-target">
+            <p class="section-intro">
+              <strong class="il-h">作用</strong>列出<strong>下一档加仓参考价</strong>、<strong>减仓参考价</strong>，以及若触发时大约要买多少股、要准备多少资金（或卖出多少股、回笼多少）。<br />
+              <strong class="il-h">用法</strong>随现价与成交记录自动更新；「较现价」小标签表示现价相对参考价的偏离百分比。<br />
+              <strong class="il-h">可实现</strong>把抽象策略参数变成「下一笔具体数字」，与策略状态条、计划表同源。
+            </p>
+          </div>
+        </div>
+        <div class="kv-grid" id="keyLevels"></div>
+      </section>
+      <section>
+        <h2>持仓快照</h2>
+        <div class="section-intro-wrap" data-intro-key="position">
+          <div class="intro-toggle-row">
+            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          </div>
+          <div class="section-intro-toolbar-target">
+            <p class="section-intro">
+              <strong class="il-h">作用</strong>汇总当前总持仓股数、持仓均价、名义成本等，确认「登记成交」是否与你自己账本一致。<br />
+              <strong class="il-h">用法</strong>在「成交记录」里登记/加仓/卖出后，此处会立刻重算。<br />
+              <strong class="il-h">可实现</strong>与费用区、计划表、实时建议表共用同一套持仓逻辑，发现不对可「撤销上一笔」或改「手动校正持仓最低价」。
+            </p>
+          </div>
+        </div>
+        <div class="stat" id="positionStats"></div>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section>
+        <h2>标的与现价来源</h2>
+        <div class="section-intro-wrap" data-intro-key="form-target">
+          <div class="intro-toggle-row">
+            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          </div>
+          <div class="section-intro-toolbar-target">
+            <p class="section-intro">
+              <strong class="il-h">作用</strong>告诉全页「正在算哪只票」、<strong>总预算与参考买入价</strong>，并决定用自动行情还是<strong>手动现价</strong>。<br />
+              <strong class="il-h">用法</strong>填 6 位代码与名称后等行情刷新；改预算/初始价后点「重算计划表」。断网时勾选「用手动价格覆盖」并在「手动现价」填写。与顶部大字价、左侧当前自选格<strong>同步</strong>。<br />
+              <strong class="il-h">可实现</strong>与计划表、费用区、K 线、新闻使用<strong>同一代码与现价口径</strong>；名称可被行情接口自动回填。
+            </p>
+          </div>
+        </div>
+        <label>6 位代码（金正大默认 002470）</label>
+        <input type="text" id="stockCode" value="002470" maxlength="6" inputmode="numeric" />
+        <label>显示名称</label>
+        <input type="text" id="stockName" value="金正大" />
+        <div class="chk-row">
+          <input type="checkbox" id="useManualPrice" />
+          <span>用手动价格覆盖行情（断网或对账时用）</span>
+        </div>
+        <label>手动现价（元）</label>
+        <input type="number" id="currentPrice" placeholder="不填则使用自动行情" min="0" step="0.001" />
+        <div class="row2">
+          <div>
+            <label>总预算（元）</label>
+            <input type="number" id="budget" value="49398" min="0" step="0.01" />
+          </div>
+          <div>
+            <label>参考 / 初始买入价（元）</label>
+            <input type="number" id="entryPrice" value="2.897" min="0.01" step="0.001" />
+          </div>
+        </div>
+        <p class="fee-note" style="margin:0;">加仓跌幅、倍数、减仓与目标净利等已移至下方「计划表 · 策略参数」。</p>
+        <button type="button" class="btn btn-secondary" id="btnRecalc">重算计划表</button>
+        <button type="button" class="btn btn-ghost" id="btnNotify">系统通知权限</button>
+        <p class="mini-link">上一版纯手动界面已另存为 <a href="stock-strategy-tracker-classic.html" target="_blank" rel="noopener">stock-strategy-tracker-classic.html</a></p>
+      </section>
+
+      <section>
+        <h2>成交记录</h2>
+        <div class="section-intro-wrap" data-intro-key="ledger">
+          <div class="intro-toggle-row">
+            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          </div>
+          <div class="section-intro-toolbar-target">
+            <p class="section-intro">
+              <strong class="il-h">作用</strong>把真实买卖记进账本，驱动<strong>持仓均价、股数、策略线、费用测算</strong>；可单独校正「持仓最低价」影响减仓参考。<br />
+              <strong class="il-h">用法</strong>先「登记初始建仓」；加仓/卖出填价与股数后点对应按钮；卖空股数可留空按策略比例。错了用「撤销上一笔」，重来用「清空记录」。下方列表为时间倒序。<br />
+              <strong class="il-h">可实现</strong>与<strong>每只自选卡独立快照</strong>；不经过券商，仅本地模拟，便于和 Excel 对账。
+            </p>
+          </div>
+        </div>
+        <label>手动校正持仓最低价（元）</label>
+        <input type="number" id="lowWater" placeholder="留空则用成交最低买入价" min="0" step="0.001" />
+        <button type="button" class="btn btn-buy" id="btnInitBuy">登记初始建仓</button>
+        <div class="row2" style="margin-top:0.5rem;">
+          <div>
+            <label>加仓价</label>
+            <input type="number" id="addPrice" min="0.01" step="0.001" />
+          </div>
+          <div>
+            <label>加仓股数</label>
+            <input type="number" id="addShares" min="0" step="1" placeholder="空=持仓×加仓倍数" />
+          </div>
+        </div>
+        <button type="button" class="btn btn-buy" id="btnAdd">确认加仓</button>
+        <div class="row2" style="margin-top:0.5rem;">
+          <div>
+            <label>卖出价</label>
+            <input type="number" id="sellPrice" min="0.01" step="0.001" />
+          </div>
+          <div>
+            <label>卖出股数</label>
+            <input type="number" id="sellShares" min="0" step="1" placeholder="空=策略减仓%" />
+          </div>
+        </div>
+        <button type="button" class="btn btn-sell" id="btnSell">确认卖出</button>
+        <button type="button" class="btn btn-ghost" id="btnUndo">撤销上一笔</button>
+        <button type="button" class="btn btn-ghost" id="btnClear">清空记录</button>
+        <ul class="log" id="ledger"></ul>
+      </section>
+    </div>
+
+    <section class="plan-params-grid" style="margin-top:1rem;">
+      <h2>计划表 · 策略参数（数字可改，改后自动重算计划与提示）</h2>
+      <div class="section-intro-wrap" data-intro-key="plan-params">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>用几个数字完整描述你的<strong>网格/分批</strong>纪律：跌幅触发、每档加仓相对持仓的倍数、反弹减仓比例、目标净利等。<br />
+            <strong class="il-h">用法</strong>直接改输入框，页面会联动重算「计划表」「关键价位」「策略状态」与费用区；点「重算计划表」强制刷新。灰字示例可对照理解各字段含义。<br />
+            <strong class="il-h">可实现</strong>同一套参数驱动<strong>理论计划表 + 实盘提示 + 目标卖价测算</strong>，改一处处处更新。
+          </p>
+        </div>
+      </div>
+      <p class="fee-note" style="margin-bottom:0.65rem;">
+        例：每跌 <strong>3%</strong> 加仓 →「较上一笔买入跌」填 3；<strong>加仓一倍</strong> →「加仓倍数」填 1（每档买入股数≈当时总持仓，总股数约翻倍）。倍数为 0.5 则每档只加半仓份额。反弹减仓比例、目标净利用于卖点与上方费用测算。
+      </p>
+      <div class="row2">
+        <div>
+          <label>较上一笔买入下跌多少 % 触发下一档加仓</label>
+          <input type="number" id="dropPct" value="20" min="0.1" step="0.1" />
+        </div>
+        <div>
+          <label>加仓倍数（相对当前总持仓股数，1=约翻倍）</label>
+          <input type="number" id="addMult" value="1" min="0.01" step="0.01" />
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>持仓最低价反弹多少 % 参考减仓</label>
+          <input type="number" id="bouncePct" value="5" min="0.1" step="0.1" />
+        </div>
+        <div>
+          <label>触发减仓时卖出持仓的 %</label>
+          <input type="number" id="sellHalfPct" value="50" min="1" max="100" step="1" />
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>一手股数（A 股一般 100）</label>
+          <input type="number" id="lotSize" value="100" min="1" step="1" />
+        </div>
+        <div>
+          <label>目标净利 %（全仓卖、扣卖出费后相对名义成本，用于上方测算）</label>
+          <input type="number" id="targetProfitPct" value="5" min="0.1" step="0.1" />
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary" id="btnRecalcPlan">重算计划表</button>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>计划表（理论触发价）</h2>
+      <div class="section-intro-wrap" data-intro-key="plan-table">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>在<strong>不实际下单</strong>的前提下，按预算与参数列出每一档理论<strong>触发价、买入股数、累计持仓、累计投入与均价</strong>。<br />
+            <strong class="il-h">用法</strong>先确认「标的与现价来源」里预算与初始价，再调上方策略参数；表宽可横向滚动查看。<br />
+            <strong class="il-h">可实现</strong>沙盘推演多档买入后的仓位与均价；与「成交记录」里的真实成交相互对照，发现计划与执行偏差。
+          </p>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>阶段</th>
+              <th>触发价</th>
+              <th>操作</th>
+              <th>股数</th>
+              <th>金额</th>
+              <th>累计持仓</th>
+              <th>累计投入</th>
+              <th>均价</th>
+            </tr>
+          </thead>
+          <tbody id="planBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>实时仓位与买卖建议（随行情刷新）</h2>
+      <div class="section-intro-wrap" data-intro-key="live-advice">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>用表格把<strong>现价、持仓、下一加仓价、减仓价</strong>等关键数字与一句<strong>操作建议类说明</strong>放在一起，随行情刷新。<br />
+            <strong class="il-h">用法</strong>盘中扫表即可；若某行是「等待行情」，请检查自动行情或手动现价。本表为规则生成，<strong>不构成投资建议</strong>。<br />
+            <strong class="il-h">可实现</strong>与「关键价位」「策略状态」同一套逻辑下的<strong>多维度对照</strong>。
+          </p>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="t-advice">
+          <thead>
+            <tr>
+              <th>维度</th>
+              <th>数值</th>
+              <th>建议</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody id="liveAdviceBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>自定义买点 / 计划买点</h2>
+      <div class="section-intro-wrap" data-intro-key="buy-points">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>记录若干条你<strong>心理上想加</strong>的价位（如技术支撑、下一档计划价），可写备注，与真实成交<strong>分开</strong>。<br />
+            <strong class="il-h">用法</strong>填「买点价格」与「备注」后点「添加买点」；列表在按钮下方，可逐条删除。<br />
+            <strong class="il-h">可实现</strong>把「计划」与「已成交」区分开，避免与账本混淆。
+          </p>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>买点价格（元）</label>
+          <input type="number" id="bpPrice" min="0.01" step="0.001" placeholder="例如下一档加仓价" />
+        </div>
+        <div>
+          <label>备注</label>
+          <input type="text" id="bpNote" placeholder="如：第2次加仓参考" />
+        </div>
+      </div>
+      <button type="button" class="btn btn-primary" id="btnAddBp">添加买点</button>
+      <div id="buyPointsList" style="margin-top:0.65rem;"></div>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>相关公告与新闻 v1.1（分类 · 多源 · 可展开）</h2>
+      <div class="section-intro-wrap" data-intro-key="news">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>拉取并保存<strong>公司公告</strong>与<strong>网页 RSS 新闻</strong>（多源聚合），自动打标签与简单情绪；支持<strong>分类筛选、高风险摘要、本地新闻库、分页、导出 Markdown</strong>；可将单条新闻结论<strong>记入胜率统计</strong>（与上方评定窗口、阈值配合）。<br />
+            <strong class="il-h">用法</strong>先设「评定窗口」「阈值」与可选「行业/板块、关键词、rss2json Key」；点「拉取公告 / 拉取网页新闻」，用 Tab 切换视图；网页新闻可勾选「每 30 分钟自动拉」。展开单条可看匹配理由；「记入统计」仅对买入/卖出类且需有效现价。<br />
+            <strong class="il-h">可实现</strong>按标的存<strong>大量历史新闻</strong>（有上限）、过滤自选其他股票串条、把舆情与技术面结论纳入同一套<strong>机械胜率复盘</strong>（非研报）。
+          </p>
+        </div>
+      </div>
+      <div class="row2" style="margin-bottom:0.5rem;">
+        <div>
+          <label>建议评定窗口（自然日，模拟中长线）</label>
+          <input type="number" id="evalDays" value="20" min="5" max="365" step="1" />
+        </div>
+        <div>
+          <label>方向判定优势阈值（%，买入要涨超此幅度算胜）</label>
+          <input type="number" id="winThresholdPct" value="2" min="0.1" max="20" step="0.1" />
+        </div>
+      </div>
+      <div class="row2" style="margin-bottom:0.5rem;">
+        <div>
+          <label>行业 / 板块（可选，仅用于推断上方主题标签，不参与全文宽松匹配）</label>
+          <input type="text" id="newsSector" placeholder="如：化肥、汽车零部件" />
+        </div>
+        <div>
+          <label>关注关键词（可选，逗号分隔）</label>
+          <input type="text" id="newsKeywords" placeholder="如：政策,关税,回购" />
+        </div>
+      </div>
+      <div class="row2" style="margin-bottom:0.5rem;">
+        <div>
+          <label>网页新闻时间范围</label>
+          <select id="newsWindowDays">
+            <option value="1">最近约 24 小时</option>
+            <option value="7" selected>最近 7 天</option>
+          </select>
+        </div>
+        <div>
+          <label>rss2json API Key（可选，提高 RSS 转换成功率）</label>
+          <input type="password" id="newsRss2JsonKey" placeholder="留空则匿名请求（有额度限制）" autocomplete="off" />
+        </div>
+      </div>
+      <p class="fee-note" style="margin-bottom:0.65rem;">
+        <strong>胜率定义：</strong>仅统计「买入/卖出」类建议。自记录时刻起满 <code>评定窗口</code> 天后，用<strong>该时刻之后首次刷新抓到的股价</strong>作为「期满评估价」（避免偷看未来）。买入建议：<strong>评估价 ≥ 建议时股价×(1+阈值%)</strong> 记为胜；卖出建议：<strong>评估价 ≤ 建议时股价×(1−阈值%)</strong> 记为胜。进行中未期满的不计入分母。
+      </p>
+      <p class="fee-note" style="margin-bottom:0.65rem;">
+        <strong>网页新闻逻辑：</strong>根据<strong>代码 + 公司名 + 行业/板块</strong>推断<strong>最多 5 个主题标签</strong>；入库时须命中<strong>本公司名或股票代码/手工关键词</strong>，或<strong>主题标签字面出现在标题中</strong>；若标题/摘要出现<strong>自选列表里其他标的证券简称</strong>（≥3 字）或<strong>其他 A 股六位代码</strong>，且未明确命中本标的，则丢弃以防串股。多源 RSS 经 rss2json。新闻按标的存入本地<strong>新闻库</strong>（单标的上限约 3000 条）。<strong>TuShare</strong> 仍需本地服务端。
+      </p>
+      <div class="news-cat-tabs" id="newsCatTabs" role="tablist">
+        <button type="button" class="active" data-news-cat="all">全部</button>
+        <button type="button" data-news-cat="announce">公司公告</button>
+        <button type="button" data-news-cat="web">网页新闻</button>
+        <button type="button" data-news-cat="risk">高风险</button>
+      </div>
+      <div id="webNewsTagBar" class="web-tag-bar fee-note" style="margin:0.45rem 0 0.35rem;"></div>
+      <label class="chk-row" style="margin:0 0 0.5rem;display:flex;align-items:center;gap:0.4rem;">
+        <input type="checkbox" id="webNewsAutoRefresh" checked />
+        <span>网页新闻每 <strong>30 分钟</strong>自动按下方主题标签聚合拉取（仅当前标的，后台静默）</span>
+      </label>
+      <button type="button" class="btn btn-secondary" id="btnFetchNews">拉取东方财富公告</button>
+      <button type="button" class="btn btn-secondary" id="btnFetchWebNews">拉取网页新闻（RSS 聚合）</button>
+      <button type="button" class="btn btn-ghost" id="btnAddNewsManual">手动添加一条新闻</button>
+      <button type="button" class="btn btn-ghost" id="btnExportNewsMd">导出当前列表为 Markdown</button>
+      <span class="fee-note" id="newsWinRate" style="display:inline-block;margin-left:0.5rem;"></span>
+      <div id="newsHighRiskHost" style="margin-top:0.75rem;"></div>
+      <div id="newsList" style="margin-top:0.5rem;"></div>
+      <div id="newsPaginationBar" class="news-pagination" aria-label="新闻列表分页"></div>
+    </section>
+
+    <section style="margin-top:1rem;">
+      <h2>完整下一笔参数</h2>
+      <div class="section-intro-wrap" data-intro-key="next-hints">
+        <div class="intro-toggle-row">
+          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        </div>
+        <div class="section-intro-toolbar-target">
+          <p class="section-intro">
+            <strong class="il-h">作用</strong>用<strong>一行或多行纯文本</strong>再次汇总「下一加仓价、股数、减仓价、清算价」等，方便<strong>复制发微信 / 截图留存</strong>。<br />
+            <strong class="il-h">用法</strong>无需操作，随持仓与参数自动刷新。<br />
+            <strong class="il-h">可实现</strong>与「关键价位」卡片<strong>同源数字</strong>；若偶发不一致，以关键价位与计划表为准并刷新页面。
+          </p>
+        </div>
+      </div>
+      <div class="stat" id="nextHints"></div>
+    </section>
+
+    <p class="disclaimer">说明：行情与 K 线为第三方公开数据；公告接口为东方财富通道，国外资讯需自行手动添加并翻译。费用与 5% 目标价为按你设定费率测算，实际以券商交割单为准。新闻情绪与技术面结论均为本地规则生成，胜率统计为事后机械判定，不构成投资建议。A 股有涨跌停、一手 100 股、T+1 等规则；越跌越买会放大亏损与资金占用，请谨慎决策。</p>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_V1 = "stock-strategy-tracker-v1";
+    const STORAGE_V2 = "stock-strategy-tracker-v2";
+    const WATCH_SLOT_COUNT = 50;
+    const NEWS_LIBRARY_MAX = 3000;
+
+    const defaultWatchlist = () =>
+      Array.from({ length: WATCH_SLOT_COUNT }, (_, i) =>
+        i === 0 ? { code: "002470", name: "金正大" } : { code: "", name: "" }
+      );
+
+    function normalizeWatchlist(wl, settings) {
+      const out = defaultWatchlist();
+      if (!Array.isArray(wl)) {
+        out[0] = {
+          code: String((settings && settings.stockCode) || "002470").replace(/\D/g, "").slice(0, 6),
+          name: String((settings && settings.stockName) || "金正大").trim(),
+        };
+        return out;
+      }
+      for (let i = 0; i < WATCH_SLOT_COUNT; i++) {
+        if (wl[i] && typeof wl[i] === "object") {
+          out[i] = {
+            code: String(wl[i].code || "").replace(/\D/g, "").slice(0, 6),
+            name: String(wl[i].name || "").trim(),
+          };
+        }
+      }
+      return out;
+    }
+
+    const defaultSettings = () => ({
+      stockCode: "002470",
+      stockName: "金正大",
+      autoRefresh: true,
+      refreshSec: 10,
+      useManualPrice: false,
+      evalDays: 20,
+      winThresholdPct: 2,
+      addMult: 1,
+      targetProfitPct: 5,
+      newsSector: "",
+      newsKeywords: "",
+      newsWindowDays: 7,
+      newsListFilter: "all",
+      newsRss2JsonKey: "",
+      webNewsAutoRefresh: true,
+      lastWebNewsTags: [],
+      newsPageSize: 20,
+      newsListPage: 1,
+      collapsedIntros: {},
+    });
+
+    function loadState() {
+      try {
+        const raw2 = localStorage.getItem(STORAGE_V2);
+        if (raw2) {
+          const o = JSON.parse(raw2);
+          const settings = { ...defaultSettings(), ...(o.settings || {}) };
+          return {
+            ledger: o.ledger || [],
+            settings,
+            buyPoints: o.buyPoints || [],
+            adviceHistory: o.adviceHistory || [],
+            newsItems: o.newsItems || [],
+            watchlist: normalizeWatchlist(o.watchlist, settings),
+            activeWatchIndex: Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, Number(o.activeWatchIndex) || 0)),
+            stockSnapshots: o.stockSnapshots && typeof o.stockSnapshots === "object" ? o.stockSnapshots : {},
+            activeStockCode: String(o.activeStockCode || "").replace(/\D/g, "").slice(0, 6),
+          };
+        }
+        const raw1 = localStorage.getItem(STORAGE_V1);
+        if (raw1) {
+          const o = JSON.parse(raw1);
+          const settings = { ...defaultSettings(), ...(o.settings || {}) };
+          return {
+            ledger: o.ledger || [],
+            settings,
+            buyPoints: o.buyPoints || [],
+            adviceHistory: o.adviceHistory || [],
+            newsItems: o.newsItems || [],
+            watchlist: normalizeWatchlist(null, settings),
+            activeWatchIndex: 0,
+            stockSnapshots: {},
+            activeStockCode: String(settings.stockCode || "").replace(/\D/g, "").slice(0, 6),
+          };
+        }
+      } catch (e) {}
+      const settings = defaultSettings();
+      return {
+        ledger: [],
+        settings,
+        buyPoints: [],
+        adviceHistory: [],
+        newsItems: [],
+        watchlist: normalizeWatchlist(null, settings),
+        activeWatchIndex: 0,
+        stockSnapshots: {},
+        activeStockCode: String(settings.stockCode || "").replace(/\D/g, "").slice(0, 6),
+      };
+    }
+
+    function saveState(s) {
+      try {
+        const key = String(s.activeStockCode || "").replace(/\D/g, "").slice(0, 6);
+        if (key.length === 6 && $("budget") && $("lowWater") && $("entryPrice")) {
+          if (!s.stockSnapshots) s.stockSnapshots = {};
+          s.stockSnapshots[key] = {
+            ledger: JSON.parse(JSON.stringify(s.ledger || [])),
+            buyPoints: JSON.parse(JSON.stringify(s.buyPoints || [])),
+            adviceHistory: JSON.parse(JSON.stringify(s.adviceHistory || [])),
+            newsItems: JSON.parse(JSON.stringify(s.newsItems || [])),
+            budget: Number($("budget").value) || 0,
+            entryPrice: Number($("entryPrice").value) || 0,
+            lowWater: $("lowWater").value,
+          };
+        }
+      } catch (e) {}
+      localStorage.setItem(STORAGE_V2, JSON.stringify(s));
+    }
+
+    let state = loadState();
+    if (!state.settings) state.settings = defaultSettings();
+    if (!state.settings.collapsedIntros || typeof state.settings.collapsedIntros !== "object") {
+      state.settings.collapsedIntros = {};
+    }
+    if (!state.buyPoints) state.buyPoints = [];
+    if (!state.adviceHistory) state.adviceHistory = [];
+    if (!state.newsItems) state.newsItems = [];
+    normalizeAllNewsItemsInState();
+    if (!state.watchlist) state.watchlist = normalizeWatchlist(null, state.settings);
+    if (state.activeWatchIndex == null || state.activeWatchIndex === undefined) state.activeWatchIndex = 0;
+    if (!state.stockSnapshots) state.stockSnapshots = {};
+    const asc = String(state.activeStockCode || state.settings.stockCode || "").replace(/\D/g, "").slice(0, 6);
+    state.activeStockCode = asc.length === 6 ? asc : "";
+    if (!localStorage.getItem(STORAGE_V2)) saveState(state);
+
+    const $ = (id) => document.getElementById(id);
+
+    function applyIntroTogglesFromSettings() {
+      const m = (state.settings && state.settings.collapsedIntros) || {};
+      document.querySelectorAll(".section-intro-wrap[data-intro-key]").forEach((wrap) => {
+        const k = wrap.getAttribute("data-intro-key");
+        if (!k) return;
+        const collapsed = !!m[k];
+        wrap.classList.toggle("intro-collapsed", collapsed);
+        const btn = wrap.querySelector(".btn-intro-toggle");
+        if (btn) {
+          btn.textContent = collapsed ? "（展开介绍）" : "（隐藏介绍）";
+          btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        }
+      });
+    }
+
+    document.body.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-intro-toggle");
+      if (!btn) return;
+      const wrap = btn.closest(".section-intro-wrap");
+      if (!wrap) return;
+      const key = wrap.getAttribute("data-intro-key");
+      if (!key) return;
+      e.preventDefault();
+      if (!state.settings.collapsedIntros || typeof state.settings.collapsedIntros !== "object") {
+        state.settings.collapsedIntros = {};
+      }
+      state.settings.collapsedIntros[key] = !state.settings.collapsedIntros[key];
+      saveState(state);
+      applyIntroTogglesFromSettings();
+    });
+
+    let quote = { price: null, prevClose: null, apiName: null, updated: null, error: null, source: null };
+    let cardQuotes = {};
+    let refreshTimer = null;
+    let lastAlertZone = null;
+
+    function normalizeRefreshSec(v) {
+      const allowed = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+      const raw = Number(v);
+      if (!isFinite(raw)) return 10;
+      const clamped = Math.max(1, Math.min(300, Math.round(raw)));
+      if (allowed.indexOf(clamped) >= 0) return clamped;
+      let best = 10;
+      let bestDiff = 999;
+      for (let i = 0; i < allowed.length; i++) {
+        const d = Math.abs(allowed[i] - clamped);
+        if (d < bestDiff) {
+          bestDiff = d;
+          best = allowed[i];
+        }
+      }
+      return best;
+    }
+
+    const FEE_COMM_R = 0.0003;
+    const FEE_COMM_MIN = 5;
+    const FEE_STAMP_R = 0.0005;
+    const FEE_TRANS_R = 0.00001;
+
+    function commFee(amount) {
+      return Math.max(amount * FEE_COMM_R, FEE_COMM_MIN);
+    }
+    function buySideFees(amount) {
+      return commFee(amount) + amount * FEE_TRANS_R;
+    }
+    function sellSideFees(amount) {
+      return commFee(amount) + amount * FEE_STAMP_R + amount * FEE_TRANS_R;
+    }
+    function netSellProceeds(grossAmount) {
+      return grossAmount - sellSideFees(grossAmount);
+    }
+    function solveSellPriceForNetProfitPct(S, costBasis, targetPct) {
+      if (S <= 0 || costBasis <= 0) return null;
+      const targetNet = costBasis * (1 + targetPct / 100);
+      let lo = 0.01;
+      let hi = Math.max((costBasis / S) * 3, 0.1);
+      for (let i = 0; i < 80; i++) {
+        const mid = (lo + hi) / 2;
+        const g = mid * S;
+        if (netSellProceeds(g) >= targetNet) hi = mid;
+        else lo = mid;
+      }
+      return hi;
+    }
+
+    function renderPnL() {
+      const cfg = getInputs();
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const p = cfg.currentPrice;
+      const mkt = $("pnlMktVal");
+      const fl = $("pnlFloat");
+      const ns = $("pnlNetSell");
+      const np = $("pnlNetPct");
+      const t5 = $("pnlTarget5");
+      const rb = $("pnlReboundPct");
+      if (!mkt) return;
+      if (pos.shares <= 0 || p == null || p <= 0) {
+        mkt.textContent = fl.textContent = ns.textContent = np.textContent = t5.textContent = rb.textContent = "—";
+        return;
+      }
+      const grossMkt = p * pos.shares;
+      const floatNom = grossMkt - pos.costBasis;
+      const netAtP = netSellProceeds(grossMkt);
+      const netPct = pos.costBasis > 0 ? ((netAtP - pos.costBasis) / pos.costBasis) * 100 : 0;
+      mkt.textContent = grossMkt.toFixed(2) + " 元";
+      fl.textContent = (floatNom >= 0 ? "+" : "") + floatNom.toFixed(2) + " 元";
+      fl.className = "pnl-big " + (floatNom >= 0 ? "pnl-up" : "pnl-down");
+      ns.textContent = netAtP.toFixed(2) + " 元";
+      np.textContent = (netPct >= 0 ? "+" : "") + netPct.toFixed(2) + "%";
+      np.className = "pnl-big " + (netPct >= 0 ? "pnl-up" : "pnl-down");
+      const tp = cfg.targetProfitPct != null && cfg.targetProfitPct > 0 ? cfg.targetProfitPct : 5;
+      if ($("pnlTargetPctLabel")) $("pnlTargetPctLabel").textContent = String(tp);
+      const px5 = solveSellPriceForNetProfitPct(pos.shares, pos.costBasis, tp);
+      if (px5 != null && isFinite(px5)) {
+        t5.textContent =
+          px5.toFixed(3) + " 元（全仓一次性卖出、已扣卖出侧费用后净利约 +" + tp + "%）";
+        rb.textContent = ((px5 / p - 1) * 100).toFixed(2) + "%";
+      } else {
+        t5.textContent = rb.textContent = "—";
+      }
+    }
+
+    function emaCalc(arr, period) {
+      const out = new Array(arr.length).fill(null);
+      if (arr.length < period) return out;
+      let sum = 0;
+      for (let i = 0; i < period; i++) sum += arr[i];
+      out[period - 1] = sum / period;
+      const k = 2 / (period + 1);
+      for (let i = period; i < arr.length; i++) {
+        out[i] = arr[i] * k + out[i - 1] * (1 - k);
+      }
+      return out;
+    }
+    function macdCalc(closes) {
+      const ema12 = emaCalc(closes, 12);
+      const ema26 = emaCalc(closes, 26);
+      const dif = closes.map((_, i) =>
+        ema12[i] != null && ema26[i] != null ? ema12[i] - ema26[i] : null
+      );
+      const difClean = dif.map((v) => (v == null ? 0 : v));
+      const deaArr = emaCalc(difClean, 9);
+      const hist = closes.map((_, i) =>
+        dif[i] != null && deaArr[i] != null ? 2 * (dif[i] - deaArr[i]) : null
+      );
+      return { dif, dea: deaArr, hist };
+    }
+
+    let klinePeriod = "day";
+    let lastKlineZoomKey = "";
+    let klineRangeLinkInited = false;
+    let chartPrice = null;
+    let chartMacd = null;
+    let seriesCandle = null;
+    let seriesHist = null;
+    let seriesDif = null;
+    let seriesDea = null;
+    let lastKlineListId = "";
+
+    function normKTime(t) {
+      const s = String(t || "").trim();
+      if (/^\d{8}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
+      return s;
+    }
+
+    function findQQDataBlock(payload, listId) {
+      if (!payload || !payload.data) return null;
+      const d = payload.data;
+      if (d[listId]) return d[listId];
+      const lower = listId.toLowerCase();
+      for (const k of Object.keys(d)) {
+        if (k.toLowerCase() === lower) return d[k];
+      }
+      return null;
+    }
+
+    function parseQQKlinePayload(payload, listId, period) {
+      if (!payload || Number(payload.code) !== 0 || !payload.data) return null;
+      const block = findQQDataBlock(payload, listId);
+      if (!block) return null;
+      const keyMap = { day: ["qfqday", "day"], week: ["qfqweek", "week"], month: ["qfqmonth", "month"] };
+      const keys = keyMap[period] || ["day", "qfqday"];
+      let raw = null;
+      for (const k of keys) {
+        if (block[k] && block[k].length) {
+          raw = block[k];
+          break;
+        }
+      }
+      if (!raw) {
+        for (const k of Object.keys(block)) {
+          const v = block[k];
+          if (Array.isArray(v) && v.length && typeof v[0] === "string" && v[0].indexOf(",") > 0) {
+            raw = v;
+            break;
+          }
+        }
+      }
+      if (!raw) return null;
+      const ohlc = [];
+      for (const row of raw) {
+        const s = typeof row === "string" ? row.split(",") : null;
+        if (!s || s.length < 5) continue;
+        const time = normKTime(s[0]);
+        const open = parseFloat(s[1]);
+        const close = parseFloat(s[2]);
+        const high = parseFloat(s[3]);
+        const low = parseFloat(s[4]);
+        if (!isFinite(close)) continue;
+        ohlc.push({ time, open, high, low, close });
+      }
+      return ohlc;
+    }
+
+    function qqKlineParam(listId, period) {
+      const n = period === "day" ? 320 : period === "week" ? 200 : 120;
+      return listId + "," + period + ",,," + n + ",qfq";
+    }
+
+    function loadQQKlineScript(url, vn, listId, period, cb) {
+      const script = document.createElement("script");
+      script.src = url;
+      script.charset = "utf-8";
+      let settled = false;
+      function finish(err, ohlc) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        try {
+          script.remove();
+        } catch (e) {}
+        try {
+          delete window[vn];
+        } catch (e) {}
+        if (err) cb(err);
+        else cb(null, ohlc);
+      }
+      const t = setTimeout(() => {
+        finish(new Error("timeout"));
+      }, 15000);
+      script.onerror = () => {
+        finish(new Error("load error"));
+      };
+      script.onload = () => {
+        requestAnimationFrame(function () {
+          setTimeout(function () {
+            const payload = window[vn];
+            if (!payload) {
+              finish(new Error("no payload"));
+              return;
+            }
+            const ohlc = parseQQKlinePayload(payload, listId, period);
+            if (!ohlc || !ohlc.length) {
+              finish(new Error("parse fail"));
+              return;
+            }
+            finish(null, ohlc);
+          }, 0);
+        });
+      };
+      document.head.appendChild(script);
+    }
+
+    function loadQQKline(listId, period, cb) {
+      const vn = "qqkl_" + listId.replace(/[^a-zA-Z0-9]/g, "_") + "_" + period;
+      const param = qqKlineParam(listId, period);
+      const urls = [
+        "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + param + "&_var=" + vn,
+        "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param=" + param + "&_var=" + vn,
+      ];
+      let idx = 0;
+      function tryNext() {
+        if (idx >= urls.length) {
+          cb(new Error("腾讯 K 线双线路均失败"));
+          return;
+        }
+        const u = urls[idx++];
+        loadQQKlineScript(u, vn, listId, period, (err, ohlc) => {
+          if (!err && ohlc && ohlc.length) cb(null, ohlc);
+          else tryNext();
+        });
+      }
+      tryNext();
+    }
+
+    function codeToEastMoneySecid(code6) {
+      const c = String(code6 || "").replace(/\D/g, "");
+      if (c.length !== 6) return null;
+      return (c.startsWith("6") ? "1." : "0.") + c;
+    }
+
+    function eastMoneyKlt(period) {
+      if (period === "day") return 101;
+      if (period === "week") return 102;
+      if (period === "month") return 103;
+      if (period === "m1") return 1;
+      if (period === "m5") return 5;
+      return 101;
+    }
+
+    function parseEastMoneyTimeCell(cell) {
+      const raw = String(cell || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(raw)) {
+        const u = Date.parse(raw.replace(/-/g, "/"));
+        return isFinite(u) ? Math.floor(u / 1000) : null;
+      }
+      if (/^\d{8}$/.test(raw)) return normKTime(raw);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      const u = Date.parse(raw.replace(/-/g, "/"));
+      return isFinite(u) ? Math.floor(u / 1000) : normKTime(raw);
+    }
+
+    function parseEastMoneyKlines(json) {
+      const lines = json && json.data && (json.data.klines || json.data.kl);
+      if (!lines) return null;
+      const arr = Array.isArray(lines) ? lines : String(lines).split(/\n+/);
+      const ohlc = [];
+      for (const line of arr) {
+        if (!line || typeof line !== "string") continue;
+        const s = line.split(",");
+        if (s.length < 5) continue;
+        const time = parseEastMoneyTimeCell(s[0]);
+        if (time == null || time === "") continue;
+        const open = parseFloat(s[1]);
+        const close = parseFloat(s[2]);
+        const high = parseFloat(s[3]);
+        const low = parseFloat(s[4]);
+        if (!isFinite(close)) continue;
+        ohlc.push({ time, open, high, low, close });
+      }
+      return ohlc.length ? ohlc : null;
+    }
+
+    function loadEastMoneyKlineJsonp(code6, period, cb) {
+      const secid = codeToEastMoneySecid(code6);
+      if (!secid) {
+        cb(new Error("代码无效"));
+        return;
+      }
+      const klt = eastMoneyKlt(period);
+      const lmt = klt === 1 || klt === 5 ? 480 : 320;
+      const cbn = "em_kline_" + Date.now();
+      const ut = "fa5fd1943c7b386f172d6893dbfba10b";
+      const base =
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=" +
+        encodeURIComponent(secid) +
+        "&klt=" +
+        klt +
+        "&fqt=1&lmt=" +
+        lmt +
+        "&end=20500101&rtntype=6&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&ut=" +
+        ut;
+      let settled = false;
+      const script = document.createElement("script");
+      function done(err, ohlc) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(tmo);
+        try {
+          script.remove();
+        } catch (e) {}
+        try {
+          delete window[cbn];
+        } catch (e) {}
+        if (err) cb(err);
+        else cb(null, ohlc);
+      }
+      window[cbn] = function (json) {
+        const ohlc = parseEastMoneyKlines(json);
+        if (!ohlc) done(new Error("东财 K 线解析失败"));
+        else done(null, ohlc);
+      };
+      script.src = base + "&cb=" + encodeURIComponent(cbn);
+      script.onerror = () => {
+        done(new Error("东财 K 线脚本失败"));
+      };
+      const tmo = setTimeout(function () {
+        done(new Error("东财 K 线超时"));
+      }, 15000);
+      document.head.appendChild(script);
+    }
+
+    function loadKlineWithFallback(listId, period, code6, cb) {
+      if (period === "m1" || period === "m5") {
+        loadEastMoneyKlineJsonp(code6, period, (err, ohlc) => {
+          if (!err && ohlc && ohlc.length) {
+            cb(null, ohlc, period === "m1" ? "东财·1分钟（随行情刷新）" : "东财·5分钟（随行情刷新）");
+          } else {
+            cb(err || new Error("分钟 K 线失败"), null, null);
+          }
+        });
+        return;
+      }
+      loadQQKline(listId, period, (err, ohlc) => {
+        if (!err && ohlc && ohlc.length) {
+          cb(null, ohlc, "腾讯前复权");
+          return;
+        }
+        loadEastMoneyKlineJsonp(code6, period, (err2, ohlc2) => {
+          if (!err2 && ohlc2 && ohlc2.length) {
+            cb(null, ohlc2, "东方财富");
+            return;
+          }
+          cb(new Error((err && err.message) + "；" + (err2 && err2.message)), null, null);
+        });
+      });
+    }
+
+    function applyChartHorzFormatting(chart, intra) {
+      if (!chart || typeof LightweightCharts === "undefined") return;
+      const TM =
+        LightweightCharts.TickMarkType ||
+        Object.freeze({ Year: 0, Month: 1, DayOfMonth: 2, Time: 3, TimeWithSeconds: 4 });
+      function formatTime(time, tickMarkType) {
+        if (time == null) return null;
+        if (typeof time === "object" && time.year != null) {
+          const y = time.year;
+          const mo = String(time.month).padStart(2, "0");
+          const da = time.day != null ? String(time.day).padStart(2, "0") : "";
+          if (tickMarkType === TM.Year) return String(y);
+          if (tickMarkType === TM.Month) return y + "/" + mo;
+          if (da) return y + "/" + mo + "/" + da;
+          return y + "/" + mo;
+        }
+        if (typeof time === "number") {
+          const dt = new Date(time * 1000);
+          const y = dt.getFullYear();
+          const mo = String(dt.getMonth() + 1).padStart(2, "0");
+          const d = String(dt.getDate()).padStart(2, "0");
+          const wantClock =
+            !!intra || tickMarkType === TM.Time || tickMarkType === TM.TimeWithSeconds;
+          if (wantClock) {
+            const h = String(dt.getHours()).padStart(2, "0");
+            const mi = String(dt.getMinutes()).padStart(2, "0");
+            return y + "/" + mo + "/" + d + " " + h + ":" + mi;
+          }
+          return y + "/" + mo + "/" + d;
+        }
+        return null;
+      }
+      chart.applyOptions({
+        localization: {
+          locale: "zh-CN",
+          dateFormat: "yyyy/MM/dd",
+          timeFormatter: function (time) {
+            const r = formatTime(time, intra ? TM.Time : TM.DayOfMonth);
+            return r != null ? r : "";
+          },
+        },
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: !!intra,
+          tickMarkFormatter: function (time, tickMarkType) {
+            const r = formatTime(time, tickMarkType);
+            return r != null && r !== "" ? r : null;
+          },
+        },
+      });
+    }
+
+    function ensureCharts() {
+      if (typeof LightweightCharts === "undefined") {
+        $("chartMeta").textContent = "未加载图表库（请联网刷新），K 线不可用。";
+        return false;
+      }
+      const el1 = $("chartMain");
+      const el2 = $("chartMacd");
+      if (!el1 || !el2) return false;
+      if (!chartPrice) {
+        chartPrice = LightweightCharts.createChart(el1, {
+          layout: {
+            background: { type: "solid", color: "#121826" },
+            textColor: "#b8c4d9",
+          },
+          grid: { vertLines: { color: "#243044" }, horzLines: { color: "#243044" } },
+          width: el1.clientWidth,
+          height: 280,
+          timeScale: { timeVisible: true, secondsVisible: false },
+        });
+        seriesCandle = chartPrice.addCandlestickSeries({
+          upColor: "#3ddc84",
+          downColor: "#ff5c5c",
+          borderVisible: false,
+          wickUpColor: "#3ddc84",
+          wickDownColor: "#ff5c5c",
+        });
+        applyChartHorzFormatting(chartPrice, false);
+      }
+      if (!chartMacd) {
+        chartMacd = LightweightCharts.createChart(el2, {
+          layout: {
+            background: { type: "solid", color: "#121826" },
+            textColor: "#b8c4d9",
+          },
+          grid: { vertLines: { color: "#243044" }, horzLines: { color: "#243044" } },
+          width: el2.clientWidth,
+          height: 140,
+          timeScale: { timeVisible: true, secondsVisible: false },
+        });
+        seriesHist = chartMacd.addHistogramSeries({
+          color: "#5eb0ff",
+          priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+        });
+        seriesDif = chartMacd.addLineSeries({ color: "#ffb020", lineWidth: 1 });
+        seriesDea = chartMacd.addLineSeries({ color: "#7a8aa0", lineWidth: 1 });
+        applyChartHorzFormatting(chartMacd, false);
+      }
+      if (chartPrice && chartMacd) {
+        const navOpts = {
+          handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: false,
+          },
+          handleScale: {
+            mouseWheel: true,
+            pinch: true,
+            axisPressedMouseMove: { time: true, price: true },
+          },
+        };
+        try {
+          chartPrice.applyOptions(navOpts);
+          chartMacd.applyOptions(navOpts);
+        } catch (errNav) {}
+        if (!klineRangeLinkInited) {
+          klineRangeLinkInited = true;
+          chartPrice.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
+            if (!chartMacd || !range) return;
+            try {
+              chartMacd.timeScale().setVisibleLogicalRange(range);
+            } catch (errLink) {}
+          });
+        }
+      }
+      return true;
+    }
+
+    let lastTechAdviceText = "";
+
+    function inferTechSideFromText(text) {
+      const t = text || "";
+      if (/死叉|转负|走弱|偏弱|风险/.test(t)) return "SELL";
+      if (/金叉|转正|回暖|偏多|偏强/.test(t)) return "BUY";
+      return "HOLD";
+    }
+
+    function klinePeriodHuman() {
+      if (klinePeriod === "m1") return "1 分钟";
+      if (klinePeriod === "m5") return "5 分钟";
+      if (klinePeriod === "day") return "日 K";
+      if (klinePeriod === "week") return "周 K";
+      return "月 K";
+    }
+
+    function syncKlineTabUi() {
+      document.querySelectorAll("#klineTabs button").forEach(function (b) {
+        b.classList.toggle("active", (b.getAttribute("data-period") || "") === klinePeriod);
+      });
+    }
+
+    function unifyBarTime(t) {
+      if (typeof t === "number" && isFinite(t)) return t;
+      if (typeof t === "string") {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+        const u = Date.parse(t.replace(/-/g, "/"));
+        if (isFinite(u)) return Math.floor(u / 1000);
+      }
+      return t;
+    }
+
+    function techAdviceFromMacd(ohlc, macd) {
+      const n = ohlc.length;
+      if (n < 3) return "数据不足，暂无技术面建议。";
+      let i = n - 1;
+      while (i > 0 && macd.hist[i] == null) i--;
+      const h0 = macd.hist[i];
+      const h1 = macd.hist[i - 1];
+      const d0 = macd.dif[i];
+      const d1 = macd.dif[i - 1];
+      const e0 = macd.dea[i];
+      const e1 = macd.dea[i - 1];
+      const close = ohlc[i].close;
+      const parts = [];
+      if (h0 != null && h1 != null) {
+        if (h1 < 0 && h0 > 0) parts.push("MACD 柱由负转正（动能回暖），短线偏多信号，但需结合仓位与策略价位。");
+        else if (h1 > 0 && h0 < 0) parts.push("MACD 柱由正转负（动能走弱），注意减仓与回撤风险。");
+        else if (h0 > 0) parts.push("MACD 柱在零轴上方，趋势动能偏强。");
+        else parts.push("MACD 柱在零轴下方，趋势动能偏弱。");
+      }
+      if (d0 != null && e0 != null && d1 != null && e1 != null) {
+        if (d1 < e1 && d0 > e0) parts.push("DIF 上穿 DEA（金叉形态），常与反弹相伴；中长线仍看你的分批规则与成本。");
+        else if (d1 > e1 && d0 < e0) parts.push("DIF 下穿 DEA（死叉形态），注意止盈与加仓节奏。");
+      }
+      parts.push("最新收盘约 " + close.toFixed(3) + " 元（K 线周期：" + klinePeriodHuman() + "）。");
+      return parts.join(" ");
+    }
+
+    function drawKlineCharts(ohlc, dataSourceLabel) {
+      if (!ensureCharts() || !ohlc.length) return;
+      const listId = codeToListId($("stockCode").value);
+      const zoomKey = (listId || "") + "|" + klinePeriod;
+      let prevRange = null;
+      if (chartPrice && lastKlineZoomKey === zoomKey) {
+        try {
+          prevRange = chartPrice.timeScale().getVisibleLogicalRange();
+        } catch (errR) {}
+      }
+      const srcTag = dataSourceLabel || "腾讯前复权";
+      const intra = klinePeriod === "m1" || klinePeriod === "m5";
+      applyChartHorzFormatting(chartPrice, intra);
+      applyChartHorzFormatting(chartMacd, intra);
+
+      const uohlc = ohlc.map((x) => ({
+        time: unifyBarTime(x.time),
+        open: x.open,
+        high: x.high,
+        low: x.low,
+        close: x.close,
+      }));
+      const closes = uohlc.map((x) => x.close);
+      const macd = macdCalc(closes);
+      const candleData = uohlc.map((x) => ({
+        time: x.time,
+        open: x.open,
+        high: x.high,
+        low: x.low,
+        close: x.close,
+      }));
+      seriesCandle.setData(candleData);
+
+      const histData = [];
+      const difData = [];
+      const deaData = [];
+      for (let i = 0; i < uohlc.length; i++) {
+        const t = uohlc[i].time;
+        if (macd.hist[i] != null) {
+          const v = macd.hist[i];
+          histData.push({
+            time: t,
+            value: v,
+            color: v >= 0 ? "rgba(61,220,132,0.65)" : "rgba(255,92,92,0.65)",
+          });
+        }
+        if (macd.dif[i] != null) difData.push({ time: t, value: macd.dif[i] });
+        if (macd.dea[i] != null) deaData.push({ time: t, value: macd.dea[i] });
+      }
+      seriesHist.setData(histData);
+      seriesDif.setData(difData);
+      seriesDea.setData(deaData);
+      if (prevRange && prevRange.from != null && prevRange.to != null) {
+        try {
+          chartPrice.timeScale().setVisibleLogicalRange(prevRange);
+          chartMacd.timeScale().setVisibleLogicalRange(prevRange);
+        } catch (errV) {
+          chartPrice.timeScale().fitContent();
+          chartMacd.timeScale().fitContent();
+        }
+      } else {
+        chartPrice.timeScale().fitContent();
+        chartMacd.timeScale().fitContent();
+      }
+      lastKlineZoomKey = zoomKey;
+
+      $("chartMeta").textContent =
+        "K 线来源：" +
+        srcTag +
+        " · " +
+        klinePeriodHuman() +
+        " · 共 " +
+        uohlc.length +
+        " 根 · 与现价同步刷新";
+      lastTechAdviceText = techAdviceFromMacd(uohlc, macd);
+      $("techAdvice").textContent = "技术面（规则化，非投资建议）：" + lastTechAdviceText;
+    }
+
+    function waitForChartLib(callback, left) {
+      if (typeof LightweightCharts !== "undefined") {
+        callback(true);
+        return;
+      }
+      const n = left != null ? left : 50;
+      if (n <= 0) {
+        callback(false);
+        return;
+      }
+      setTimeout(function () {
+        waitForChartLib(callback, n - 1);
+      }, 120);
+    }
+
+    function refreshKlineCharts() {
+      const listId = codeToListId($("stockCode").value);
+      if (!listId) return;
+      const code6 = $("stockCode").value.replace(/\D/g, "").slice(0, 6);
+      lastKlineListId = listId;
+      $("chartMeta").textContent = "加载图表库与 K 线…";
+      waitForChartLib(function (ok) {
+        if (!ok) {
+          $("chartMeta").textContent =
+            "图表库加载失败（cdn.jsdelivr / unpkg 可能被墙或拦截）。请联网、换网络，或用浏览器打开后等待数秒再点「立即刷新行情」。";
+          return;
+        }
+        $("chartMeta").textContent = "加载 K 线…";
+        loadKlineWithFallback(listId, klinePeriod, code6, function (err, ohlc, src) {
+          if (err || !ohlc || !ohlc.length) {
+            $("chartMeta").textContent =
+              "K 线失败：" +
+              (err && err.message ? err.message : "未知错误") +
+              "。可换网络或稍后重试。";
+            return;
+          }
+          drawKlineCharts(ohlc, src);
+        });
+      });
+    }
+
+    function renderLiveAdviceTable() {
+      const tb = $("liveAdviceBody");
+      if (!tb) return;
+      const cfg = getInputs();
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const p = cfg.currentPrice;
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0 ? cfg.lowWaterManual : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+      const rows = [];
+
+      if (p == null || p <= 0) {
+        rows.push(["现价", "—", "等待行情", "请先拉取自动行情或启用手动价格。"]);
+      } else {
+        rows.push(["现价", p.toFixed(3) + " 元", "—", "与顶部大字同源。"]);
+      }
+
+      if (pos.shares <= 0) {
+        rows.push(["持仓", "0", "可先建仓", "登记初始建仓后本表会联动策略线。"]);
+      } else {
+        const gross = p && p > 0 ? p * pos.shares : null;
+        const netp = gross != null ? netSellProceeds(gross) : null;
+        const pct = netp != null && pos.costBasis > 0 ? ((netp - pos.costBasis) / pos.costBasis) * 100 : null;
+        rows.push([
+          "持仓 / 均价",
+          pos.shares + " 股 / " + pos.avgPrice.toFixed(3),
+          pct != null ? (pct >= 0 ? "浮盈（扣卖费后）" : "浮亏（扣卖费后）") : "—",
+          pct != null ? "若现价全卖净回笼收益率约 " + pct.toFixed(2) + "%" : "—",
+        ]);
+      }
+
+      if (nb != null && p != null && p > 0 && pos.shares > 0) {
+        const d = ((p - nb) / nb) * 100;
+        let sug = "观望";
+        let note = "距下一加仓参考价约 " + d.toFixed(2) + "%（现价比参考价高为正）。";
+        if (p <= nb) {
+          sug = "考虑加仓";
+          note = "已触及或跌破加仓参考，结合资金与策略表格执行。";
+        } else if (d < 3) {
+          sug = "接近加仓带";
+          note = "离加仓参考较近，注意节奏。";
+        }
+        rows.push(["下一加仓参考", nb.toFixed(3), sug, note]);
+      } else {
+        rows.push(["下一加仓参考", "—", "—", "需有买入记录。"]);
+      }
+
+      if (ns != null && p != null && p > 0 && pos.shares > 0) {
+        const d = ((ns - p) / p) * 100;
+        let sug = "观望";
+        let note = "距减仓参考价约 " + d.toFixed(2) + "%（现价需再涨这么多到参考）。";
+        if (p >= ns) {
+          sug = "考虑减仓";
+          note = "已触及或突破减仓参考，可按策略卖出一部分。";
+        } else if (d < 3) {
+          sug = "接近减仓带";
+          note = "接近反弹卖出带。";
+        }
+        rows.push(["减仓参考（反弹）", ns.toFixed(3), sug, note]);
+      } else {
+        rows.push(["减仓参考", "—", "—", "需持仓最低价或手动低价。"]);
+      }
+
+      const bps = state.buyPoints || [];
+      if (bps.length && p != null && p > 0) {
+        const nearest = bps.reduce((a, b) =>
+          Math.abs(b.price - p) < Math.abs(a.price - p) ? b : a
+        );
+        rows.push([
+          "最近自定义买点",
+          nearest.price.toFixed(3),
+          p <= nearest.price ? "现价已达/低于该买点" : "现价高于该买点",
+          nearest.note || "—",
+        ]);
+      }
+
+      tb.innerHTML = rows
+        .map(
+          (r) =>
+            "<tr><td>" +
+            r[0] +
+            "</td><td>" +
+            r[1] +
+            "</td><td>" +
+            r[2] +
+            "</td><td style='text-align:left'>" +
+            r[3] +
+            "</td></tr>"
+        )
+        .join("");
+    }
+
+    function sentimentAndAdvice(title) {
+      const t = (title || "").toLowerCase();
+      const neg = /亏|下降|减持|调查|处罚|立案|退市|风险|债务|违约|下滑|暴跌|诉讼/;
+      const pos = /增长|盈利|中标|扩产|回购|增持|利好|突破|合作|订单|扭亏/;
+      let score = 0;
+      if (pos.test(title)) score += 1;
+      if (neg.test(title)) score -= 1;
+      let side = "HOLD";
+      if (score > 0) side = "BUY";
+      if (score < 0) side = "SELL";
+      const sent = score > 0 ? "偏多" : score < 0 ? "偏空" : "中性";
+      return { side, sent, detail: "基于标题关键词的规则分类（非模型研判），请自行核实正文。" };
+    }
+
+    function codeToTsTicker(code6) {
+      const c = String(code6 || "").replace(/\D/g, "").slice(0, 6);
+      if (c.length !== 6) return "";
+      return c.startsWith("6") ? c + ".SH" : c + ".SZ";
+    }
+
+    function classifyNewsImpact(title, content) {
+      const text = ((title || "") + " " + (content || "")).replace(/\s+/g, " ");
+      const posRe =
+        /利好|业绩超预期|预增|扭亏|中标|回购|增持|大单|订单|扩产|政策支持|降准|降息|超预期|净利润增长|营收增长|获批|落地|增资|合作签约|销量|景气|复苏/;
+      const negRe =
+        /立案|调查|处罚|退市风险|减持|业绩下调|预亏|亏损扩大|债务违约|诉讼|关税|停牌|风险警示|关注函|问询函|财务|清仓|暴雷|下滑|不及预期|ST\b|\*ST/;
+      const highRe =
+        /立案|退市|调查|巨亏|爆仓|违约|造假|非标|无法表示意见|实际控制人|留置|被采取强制措施|罚款过亿|财务造假|破产|清算/;
+      const hasP = posRe.test(text);
+      const hasN = negRe.test(text);
+      let impact = "?";
+      if (hasP && !hasN) impact = "+";
+      else if (hasN && !hasP) impact = "-";
+      else if (hasP && hasN) impact = "?";
+      const highRisk = highRe.test(text);
+      const reasons = [];
+      if (hasP) reasons.push("含正向/利好类词");
+      if (hasN) reasons.push("含风险/利空类词");
+      if (highRisk) reasons.push("命中高风险词库（或致大波动）");
+      if (!reasons.length) reasons.push("未命中强规则，标为中性待核实");
+      return { impact, highRisk, matchReason: reasons.join("；") };
+    }
+
+    function impactToSentimentAdvice(impact) {
+      if (impact === "+") return { sent: "偏多", side: "BUY", detail: "规则：潜在正向催化剂" };
+      if (impact === "-") return { sent: "偏空", side: "SELL", detail: "规则：潜在负向风险" };
+      return { sent: "中性", side: "HOLD", detail: "规则：影响待核实" };
+    }
+
+    const STOCK_TAG_OVERRIDES = {
+      "002703": ["汽车零部件", "智能驾驶", "自动驾驶", "人工智能"],
+      "002470": ["化肥", "农业", "复合肥", "农药"],
+      "600519": ["白酒", "消费", "品牌消费"],
+      "000001": ["银行", "大金融", "深圳本地"],
+    };
+
+    function inferStockTags(code6, companyName, sectorInput) {
+      const c = String(code6 || "").replace(/\D/g, "").slice(0, 6);
+      const name = (companyName || "").trim();
+      const out = [];
+      if (c.length === 6 && STOCK_TAG_OVERRIDES[c]) out.push.apply(out, STOCK_TAG_OVERRIDES[c]);
+      if (sectorInput) {
+        sectorInput.split(/[,，、]/).forEach(function (s) {
+          const t = s.trim();
+          if (t && out.indexOf(t) < 0) out.push(t);
+        });
+      }
+      function add(tag) {
+        if (tag && out.indexOf(tag) < 0) out.push(tag);
+      }
+      if (/汽|车|驾驶|世宝|零部件|底盘|转向|新能源|电动|智能座舱|雷达/.test(name)) {
+        add("汽车零部件");
+        add("智能驾驶");
+      }
+      if (/酒|食品|饮料|乳业|调味/.test(name)) {
+        add("消费");
+        add("食品饮料");
+      }
+      if (/银行|保险|证券|信托|金融/.test(name)) {
+        add("大金融");
+      }
+      if (/芯片|半导体|集成电路|电子|通信|软件|科技|AI|智能|算力/.test(name)) {
+        add("人工智能");
+        add("科技创新");
+      }
+      if (/医药|生物|医疗|制药|健康/.test(name)) {
+        add("医药健康");
+      }
+      if (/地产|物业|建设|基建/.test(name)) {
+        add("地产基建");
+      }
+      if (/煤|钢|有色|化工|油|气|电力|能源|光伏|锂电/.test(name)) {
+        add("周期资源");
+      }
+      if (out.length === 0) add("A股");
+      return out.slice(0, 5);
+    }
+
+    function blobMentionsDifferentAshareCode(blob, myCode6) {
+      const my = String(myCode6 || "").replace(/\D/g, "").slice(0, 6);
+      if (my.length !== 6) return false;
+      const s = String(blob || "");
+      const re = /(?:^|[^\d])([036]\d{5})(?!\d)/g;
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        if (m[1] !== my) return true;
+      }
+      return false;
+    }
+
+    function blobMentionsOtherWatchlistedSecurity(blob, myCode6, myCompanyName) {
+      const t = String(blob || "").toLowerCase();
+      const my = String(myCode6 || "").replace(/\D/g, "").slice(0, 6);
+      const myNm = (myCompanyName || "").trim();
+      const myLc = myNm.length >= 2 ? myNm.toLowerCase() : "";
+      const wl = state.watchlist || [];
+      for (let i = 0; i < wl.length; i++) {
+        const c = String(wl[i].code || "").replace(/\D/g, "").slice(0, 6);
+        const nm = (wl[i].name || "").trim();
+        if (c === my || nm.length < 3) continue;
+        const nlc = nm.toLowerCase();
+        if (t.indexOf(nlc) < 0) continue;
+        if (myLc && (nlc === myLc || myLc.indexOf(nlc) >= 0 || nlc.indexOf(myLc) >= 0)) continue;
+        return true;
+      }
+      return false;
+    }
+
+    function matchWebNewsRelevance(title, content, code6, companyName, manualKws, displayTags) {
+      const full = ((title || "") + " " + (content || "")).toLowerCase();
+      const titleLc = (title || "").toLowerCase();
+      const c = String(code6 || "").replace(/\D/g, "").slice(0, 6);
+      if (c.length !== 6) return { hit: false };
+      const comp = (companyName || "").trim();
+      if (comp.length >= 2 && full.indexOf(comp.toLowerCase()) >= 0) {
+        return { hit: true, reason: "公司名", viaTagOnly: false, fromCurrentStock: true };
+      }
+      const variants = [c, codeToTsTicker(c), c + ".sh", c + ".sz", "sh" + c, "sz" + c];
+      const listId = codeToListId(c);
+      if (listId) variants.push(listId, listId.toUpperCase());
+      for (let i = 0; i < variants.length; i++) {
+        const v = variants[i];
+        if (v && full.indexOf(String(v).toLowerCase()) >= 0) {
+          return { hit: true, reason: "股票代码", viaTagOnly: false, fromCurrentStock: true };
+        }
+      }
+      for (const kw of manualKws || []) {
+        const k = String(kw || "").trim();
+        if (k.length >= 2 && full.indexOf(k.toLowerCase()) >= 0) {
+          return { hit: true, reason: "手工关键词「" + k + "」", viaTagOnly: false, fromCurrentStock: true };
+        }
+      }
+      for (let j = 0; j < (displayTags || []).length; j++) {
+        const tag = String(displayTags[j] || "").trim();
+        const tagLc = tag.toLowerCase();
+        if (tag.length < 2) continue;
+        if (full.indexOf(tagLc) < 0) continue;
+        if (titleLc.indexOf(tagLc) < 0) continue;
+        return {
+          hit: true,
+          reason: "主题标签「" + tag + "」（标题含主题）",
+          viaTagOnly: true,
+          fromCurrentStock: false,
+        };
+      }
+      return { hit: false };
+    }
+
+    function enrichImpactWithTags(imp, title, content, displayTags) {
+      const blob = ((title || "") + " " + (content || "")).toLowerCase();
+      const hit = (displayTags || []).filter(function (tag) {
+        return tag && blob.indexOf(String(tag).toLowerCase()) >= 0;
+      });
+      if (hit.length) {
+        imp.matchReason += "；正文与主题重合：" + hit.join("、");
+      }
+      return imp;
+    }
+
+    function renderInferredWebTagsBar() {
+      const el = $("webNewsTagBar");
+      if (!el) return;
+      const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const company = ($("stockName").value || "").trim();
+      const sector = ($("newsSector") && $("newsSector").value.trim()) || "";
+      const tags = code6.length === 6 ? inferStockTags(code6, company, sector) : [];
+      if (state.settings) state.settings.lastWebNewsTags = tags;
+      if (!tags.length) {
+        el.innerHTML = "<span class='fee-note'>填写 6 位代码与公司名后，将显示自动推断的网页检索主题（≤5）。</span>";
+        return;
+      }
+      const esc = function (s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/"/g, "&quot;");
+      };
+      el.innerHTML =
+        "<strong>当前网页检索主题（≤5，可补充上方行业/板块）：</strong> " +
+        tags.map(function (t) {
+          return "<span class='web-tag-chip'>" + esc(t) + "</span>";
+        }).join(" ") +
+        "<span class='fee-note' style='display:block;margin-top:0.35rem;'>网页入库：须含<strong>本标的名称或代码/手工关键词</strong>，或<strong>主题标签字面出现在标题</strong>；若出现<strong>自选里其他标的简称</strong>（≥3 字）或<strong>其他六位代码</strong>且未命中本标的，则丢弃。</span>";
+    }
+
+    function stripHtml(s) {
+      return String(s || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function simpleHash(s) {
+      let h = 0;
+      const str = String(s || "");
+      for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+      return Math.abs(h).toString(36);
+    }
+
+    function normalizeSingleNewsItem(n, defaultCode6) {
+      const o = Object.assign({}, n);
+      const dc = String(defaultCode6 || "").replace(/\D/g, "").slice(0, 6);
+      if (!o.category) {
+        if (String(o.id || "").indexOf("manual_") === 0) o.category = "manual";
+        else o.category = "announce";
+      }
+      if (!o.stockCode && dc.length === 6) o.stockCode = dc;
+      const imp = classifyNewsImpact(o.title, o.content);
+      if (o.stockImpact == null || o.stockImpact === "") o.stockImpact = imp.impact;
+      if (o.highRisk == null) o.highRisk = imp.highRisk;
+      if (!o.matchReason) o.matchReason = imp.matchReason;
+      if (!o.sourceLabel) {
+        if (o.category === "web") o.sourceLabel = "网页RSS";
+        else if (o.category === "manual") o.sourceLabel = "手动";
+        else o.sourceLabel = "东方财富·公告";
+      }
+      const m = impactToSentimentAdvice(o.stockImpact);
+      if (!o.sentiment) o.sentiment = m.sent;
+      if (!o.advice) o.advice = m.side;
+      if (!o.adviceDetail) o.adviceDetail = o.matchReason;
+      if (o.pubTs == null) {
+        const parsed = Date.parse(o.date || "");
+        o.pubTs = isFinite(parsed) ? parsed : Date.now();
+      }
+      return o;
+    }
+
+    function normalizeAllNewsItemsInState() {
+      const c = (state.settings && state.settings.stockCode) || "";
+      state.newsItems = (state.newsItems || []).map((n) => normalizeSingleNewsItem(n, c));
+    }
+
+    function syncNewsCatTabButtons() {
+      const filter = (state.settings && state.settings.newsListFilter) || "all";
+      document.querySelectorAll("#newsCatTabs button").forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-news-cat") === filter);
+      });
+    }
+
+    function googleNewsRssUrl(query) {
+      return (
+        "https://news.google.com/rss/search?q=" +
+        encodeURIComponent(query) +
+        "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+      );
+    }
+
+    function fetchRssViaRss2Json(rssUrl, cb) {
+      const key = ($("newsRss2JsonKey") && $("newsRss2JsonKey").value.trim()) || (state.settings && state.settings.newsRss2JsonKey) || "";
+      let api =
+        "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(rssUrl);
+      if (key) api += "&api_key=" + encodeURIComponent(key);
+      fetch(api)
+        .then((r) => r.json())
+        .then((json) => {
+          if (json && json.status === "ok" && Array.isArray(json.items)) cb(null, json.items);
+          else cb(new Error(json && json.message ? json.message : "RSS 转换失败"), null);
+        })
+        .catch((e) => cb(e || new Error("网络错误"), null));
+    }
+
+    function buildWebRssFeedList(code6, companyName, displayTags) {
+      const ts = codeToTsTicker(code6);
+      const qBase = [companyName, code6, ts].filter(Boolean).join(" OR ");
+      const feeds = [
+        { name: "中新网·财经", url: "https://www.chinanews.com.cn/rss/finance.xml" },
+        { name: "新浪财经·滚动", url: "https://feed.sina.com.cn/finance/stock/hot.xml" },
+        { name: "界面新闻·投资", url: "https://www.jiemian.com/rss/invest.xml" },
+        { name: "第一财经", url: "https://www.yicai.com/rss.xml" },
+        { name: "财新·全部", url: "https://www.caixin.com/rss/all.xml" },
+        { name: "华尔街见闻", url: "https://dedicated.wallstreetcn.com/rss.xml" },
+        { name: "Investing.com·中文要闻", url: "https://cn.investing.com/rss/news.rss" },
+        { name: "Google News·标的", url: googleNewsRssUrl(qBase) },
+      ];
+      if (ts) {
+        feeds.splice(7, 0, {
+          name: "Yahoo Finance·个股",
+          url:
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" +
+            encodeURIComponent(ts) +
+            "&region=US&lang=en-US",
+        });
+      }
+      const tags = (displayTags || []).slice(0, 3);
+      for (let i = 0; i < tags.length; i++) {
+        const tag = tags[i];
+        const qTag = [tag, companyName, code6].filter(Boolean).join(" ");
+        feeds.push({ name: "Google News·主题「" + tag + "」", url: googleNewsRssUrl(qTag) });
+      }
+      return feeds;
+    }
+
+    function ingestRssItemsToNews(rawItems, sourceName, code6, silent, tagCtx) {
+      const kwLine = ($("newsKeywords") && $("newsKeywords").value.trim()) || "";
+      const kws = kwLine ? kwLine.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : [];
+      const company = ($("stockName").value || "").trim();
+      const displayTags = (tagCtx && tagCtx.displayTags) || [];
+      const winDays = Number($("newsWindowDays") && $("newsWindowDays").value) === 1 ? 1 : 7;
+      const cutoff = Date.now() - winDays * 86400000;
+      const out = [];
+      for (const it of rawItems || []) {
+        const title = stripHtml(it.title || "");
+        const content = stripHtml(it.description || it.content || "");
+        const link = (it.link && String(it.link)) || "";
+        let pub = Date.parse(it.pubDate || "");
+        if (!isFinite(pub)) pub = Date.now();
+        if (winDays === 1 && Date.now() - pub > 36 * 3600000) continue;
+        if (pub < cutoff) continue;
+        const blob = title + " " + content;
+        const match = matchWebNewsRelevance(title, content, code6, company, kws, displayTags);
+        if (!match.hit) continue;
+        if (blobMentionsOtherWatchlistedSecurity(blob, code6, company) && !match.fromCurrentStock) continue;
+        if (match.viaTagOnly && blobMentionsDifferentAshareCode(blob, code6)) continue;
+        const imp = classifyNewsImpact(title, content);
+        enrichImpactWithTags(imp, title, content, displayTags);
+        const m = impactToSentimentAdvice(imp.impact);
+        out.push({
+          id: "w_" + simpleHash(link + title).slice(0, 14) + "_" + simpleHash(sourceName),
+          title: title.slice(0, 300),
+          content: content.slice(0, 800),
+          url: link,
+          date: it.pubDate || "",
+          category: "web",
+          sourceLabel: sourceName,
+          stockImpact: imp.impact,
+          highRisk: imp.highRisk,
+          matchReason: imp.matchReason + "（匹配：" + match.reason + "）",
+          stockCode: code6,
+          pubTs: pub,
+          sentiment: m.sent,
+          advice: m.side,
+          adviceDetail: m.detail,
+        });
+      }
+      return out;
+    }
+
+    function dedupeNewsById(items) {
+      const seen = new Set();
+      const out = [];
+      for (const n of items || []) {
+        const id = n && n.id != null ? String(n.id) : "";
+        if (id) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        out.push(n);
+      }
+      return out;
+    }
+
+    function mergeWebNewsIntoState(newWebItems, silent) {
+      const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const rest = (state.newsItems || []).filter((n) => n.category !== "web" || n.stockCode !== code6);
+      let merged = rest.concat(newWebItems || []);
+      merged.sort((a, b) => (b.pubTs || 0) - (a.pubTs || 0));
+      merged = dedupeNewsById(merged);
+      state.newsItems = merged.slice(0, NEWS_LIBRARY_MAX);
+      saveState(state);
+      renderNewsList();
+      renderAdviceWinRate();
+      if (!silent) showAlert("网页新闻已写入本标的新闻库（去重后最多约 " + NEWS_LIBRARY_MAX + " 条）。本次解析新增约 " + (newWebItems || []).length + " 条候选。", "ok");
+    }
+
+    function fetchWebNewsAggregation(opts) {
+      const silent = !!(opts && opts.silent);
+      const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const company = ($("stockName").value || "").trim();
+      if (code6.length !== 6) {
+        if (!silent) showAlert("请先填写 6 位股票代码。", "bad");
+        return;
+      }
+      persistSettingsFromForm();
+      const sector = ($("newsSector") && $("newsSector").value.trim()) || "";
+      renderInferredWebTagsBar();
+      const displayTags = inferStockTags(code6, company, sector);
+      const tagCtx = { displayTags: displayTags };
+      const feeds = buildWebRssFeedList(code6, company, displayTags);
+      let idx = 0;
+      const acc = [];
+      function nextFeed() {
+        if (idx >= feeds.length) {
+          mergeWebNewsIntoState(acc, silent);
+          return;
+        }
+        const f = feeds[idx++];
+        if (!f.url) {
+          setTimeout(nextFeed, 0);
+          return;
+        }
+        fetchRssViaRss2Json(f.url, (err, items) => {
+          if (!err && items && items.length) {
+            const part = ingestRssItemsToNews(items, f.name, code6, silent, tagCtx);
+            for (const p of part) acc.push(p);
+          }
+          setTimeout(nextFeed, silent ? 350 : 280);
+        });
+      }
+      if (!silent) showAlert("正在按主题标签依次拉取多源 RSS（rss2json，部分源可能失败属正常）…", "info");
+      nextFeed();
+    }
+
+    function recordAdvice(source, title, side, detail) {
+      const p = effectivePrice();
+      if (p == null || p <= 0 || side === "HOLD") return null;
+      const evalDays = Number(state.settings.evalDays) || 20;
+      const id = "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+      const rec = {
+        id,
+        ts: Date.now(),
+        source,
+        title: title.slice(0, 200),
+        side,
+        detail: (detail || "").slice(0, 500),
+        priceAtAdvice: p,
+        evalDue: Date.now() + evalDays * 86400000,
+        settled: false,
+        outcome: null,
+        evalPrice: null,
+      };
+      state.adviceHistory.push(rec);
+      saveState(state);
+      return rec;
+    }
+
+    function settleAdvices() {
+      const p = effectivePrice();
+      if (p == null || p <= 0) return;
+      const thRaw = Number(state.settings.winThresholdPct);
+      const th = isFinite(thRaw) && thRaw > 0 ? thRaw : 2;
+      let ch = false;
+      for (const a of state.adviceHistory) {
+        if (a.settled || a.side === "HOLD") continue;
+        if (Date.now() < a.evalDue) continue;
+        a.settled = true;
+        a.evalPrice = p;
+        const up = th / 100;
+        if (a.side === "BUY") a.outcome = a.evalPrice >= a.priceAtAdvice * (1 + up);
+        else if (a.side === "SELL") a.outcome = a.evalPrice <= a.priceAtAdvice * (1 - up);
+        else a.outcome = null;
+        ch = true;
+      }
+      if (ch) saveState(state);
+      renderAdviceWinRate();
+    }
+
+    function renderAdviceWinRate() {
+      const el = $("newsWinRate");
+      if (!el) return;
+      const list = state.adviceHistory.filter((a) => a.side === "BUY" || a.side === "SELL");
+      const settled = list.filter((a) => a.settled && a.outcome != null);
+      const wins = settled.filter((a) => a.outcome).length;
+      const pending = list.filter((a) => !a.settled).length;
+      el.textContent =
+        "建议统计：已期满 " +
+        settled.length +
+        " 条 · 胜 " +
+        wins +
+        " · 负 " +
+        (settled.length - wins) +
+        " · 胜率 " +
+        (settled.length ? ((wins / settled.length) * 100).toFixed(1) : "—") +
+        "% · 进行中 " +
+        pending +
+        " 条";
+    }
+
+    function coerceNewsPageSize(v) {
+      const n = Number(v);
+      return [10, 20, 50, 100].indexOf(n) >= 0 ? n : 20;
+    }
+
+    function getFilteredNewsRowsWithIndex() {
+      const items = state.newsItems || [];
+      const filter = (state.settings && state.settings.newsListFilter) || "all";
+      const withIdx = items.map((n, i) => ({ n: n, i: i }));
+      if (filter === "announce") return withIdx.filter((x) => x.n.category === "announce");
+      if (filter === "web") return withIdx.filter((x) => x.n.category === "web");
+      if (filter === "manual") return withIdx.filter((x) => x.n.category === "manual");
+      if (filter === "risk") return withIdx.filter((x) => x.n.highRisk);
+      return withIdx;
+    }
+
+    function renderNewsPaginationBar(total, page, pageSize) {
+      const bar = $("newsPaginationBar");
+      if (!bar) return;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      page = Math.min(Math.max(1, page | 0), totalPages);
+      state.settings.newsListPage = page;
+      const opts = [10, 20, 50, 100]
+        .map(function (s) {
+          return "<option value='" + s + "'" + (s === pageSize ? " selected" : "") + ">" + s + " 条/页</option>";
+        })
+        .join("");
+      let pagesHtml = "";
+      const maxBtns = 5;
+      let start = Math.max(1, page - 2);
+      let end = Math.min(totalPages, start + maxBtns - 1);
+      if (end - start < maxBtns - 1) start = Math.max(1, end - maxBtns + 1);
+      for (let p = start; p <= end; p++) {
+        pagesHtml +=
+          "<button type='button' class='pg-btn" +
+          (p === page ? " pg-active" : "") +
+          "' data-pg='" +
+          p +
+          "'>" +
+          p +
+          "</button>";
+      }
+      if (end < totalPages) {
+        if (end < totalPages - 1) pagesHtml += "<span class='fee-note' style='margin:0 0.15rem;'>…</span>";
+        pagesHtml +=
+          "<button type='button' class='pg-btn" + (totalPages === page ? " pg-active" : "") + "' data-pg='" + totalPages + "'>" + totalPages + "</button>";
+      }
+      bar.innerHTML =
+        "<span class='pg-meta'>共 <strong>" +
+        total +
+        "</strong> 条</span>" +
+        "<span class='pg-btns'>" +
+        "<button type='button' class='pg-btn' data-pg-nav='prev'" +
+        (page <= 1 ? " disabled" : "") +
+        ">&lt;</button>" +
+        pagesHtml +
+        "<button type='button' class='pg-btn' data-pg-nav='next'" +
+        (page >= totalPages ? " disabled" : "") +
+        ">&gt;</button>" +
+        "</span>" +
+        "<label class='fee-note' style='display:inline-flex;align-items:center;gap:0.35rem;'>每页 <select class='pg-size' id='newsPageSizeSelect'>" +
+        opts +
+        "</select></label>" +
+        "<span class='fee-note' style='display:inline-flex;align-items:center;gap:0.35rem;'>跳至 <input class='pg-jump' type='number' min='1' step='1' id='newsPageJumpInput' placeholder='页码' /> 页 <button type='button' class='pg-btn' id='newsPageJumpBtn'>跳转</button></span>";
+
+      bar.querySelectorAll(".pg-btn[data-pg]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          state.settings.newsListPage = Number(b.getAttribute("data-pg")) || 1;
+          persistSettingsFromForm();
+          renderNewsList();
+        });
+      });
+      bar.querySelectorAll(".pg-btn[data-pg-nav]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          if (b.disabled) return;
+          const nav = b.getAttribute("data-pg-nav");
+          const tp = Math.max(1, Math.ceil(total / pageSize));
+          let np = Number(state.settings.newsListPage) || 1;
+          if (nav === "prev") np--;
+          else if (nav === "next") np++;
+          state.settings.newsListPage = Math.min(Math.max(1, np), tp);
+          persistSettingsFromForm();
+          renderNewsList();
+        });
+      });
+      const sel = $("newsPageSizeSelect");
+      if (sel)
+        sel.addEventListener("change", function () {
+          state.settings.newsPageSize = coerceNewsPageSize(sel.value);
+          state.settings.newsListPage = 1;
+          persistSettingsFromForm();
+          renderNewsList();
+        });
+      const jmpBtn = $("newsPageJumpBtn");
+      if (jmpBtn)
+        jmpBtn.addEventListener("click", function () {
+          const inp = $("newsPageJumpInput");
+          const tp = Math.max(1, Math.ceil(total / pageSize));
+          const v = inp ? Math.floor(Number(inp.value)) : NaN;
+          state.settings.newsListPage = Math.min(Math.max(1, isFinite(v) ? v : 1), tp);
+          persistSettingsFromForm();
+          renderNewsList();
+        });
+    }
+
+    function renderNewsList() {
+      const box = $("newsList");
+      const host = $("newsHighRiskHost");
+      const bar = $("newsPaginationBar");
+      if (!box) return;
+      const items = state.newsItems || [];
+      const filter = (state.settings && state.settings.newsListFilter) || "all";
+      if (!items.length) {
+        if (host) host.innerHTML = "";
+        box.innerHTML = "<p class='fee-note'>暂无新闻，请拉取公司公告、网页 RSS 或手动添加。</p>";
+        if (bar) bar.innerHTML = "<span class='pg-meta'>共 <strong>0</strong> 条</span>";
+        return;
+      }
+      const highRiskAll = items.filter((n) => n.highRisk);
+      if (host) {
+        if (filter === "all" && highRiskAll.length) {
+          host.innerHTML =
+            "<div class='news-highrisk-box'><h4>高风险新闻警报（可能引发较大波动，请交叉验证）</h4><ul>" +
+            highRiskAll
+              .slice(0, 15)
+              .map(function (n) {
+                return (
+                  "<li><span class=\"impact-badge " +
+                  (n.stockImpact === "+" ? "impact-pos" : n.stockImpact === "-" ? "impact-neg" : "impact-neu") +
+                  "\">" +
+                  (n.stockImpact || "?") +
+                  "</span> " +
+                  (n.title || "").replace(/</g, "&lt;") +
+                  " <span class=\"fee-note\">" +
+                  (n.sourceLabel || "").replace(/</g, "&lt;") +
+                  "</span></li>"
+                );
+              })
+              .join("") +
+            "</ul></div>";
+        } else {
+          host.innerHTML = "";
+        }
+      }
+      const rows = getFilteredNewsRowsWithIndex();
+      const total = rows.length;
+      let pageSize = coerceNewsPageSize(state.settings && state.settings.newsPageSize);
+      state.settings.newsPageSize = pageSize;
+      let page = Number(state.settings.newsListPage) || 1;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      if (page > totalPages) page = totalPages;
+      state.settings.newsListPage = page;
+      const start = (page - 1) * pageSize;
+      const pageRows = rows.slice(start, start + pageSize);
+      box.innerHTML = pageRows.length
+        ? pageRows
+            .map(function (row) {
+              const n = row.n;
+              const idx = row.i;
+              const imp = n.stockImpact || "?";
+              const impCls = imp === "+" ? "impact-pos" : imp === "-" ? "impact-neg" : "impact-neu";
+              const sb =
+                n.sentiment === "偏多" ? "sent-pos" : n.sentiment === "偏空" ? "sent-neg" : "sent-neu";
+              const adv =
+                n.advice === "BUY" ? "倾向买入参考" : n.advice === "SELL" ? "倾向卖出参考" : "中性/持有参考";
+              const body = (n.content || "（无正文）").replace(/</g, "&lt;");
+              const cat =
+                n.category === "web" ? "网页" : n.category === "manual" ? "手动" : n.category === "announce" ? "公告" : "其他";
+              return (
+                "<details class='news-item' data-nid='" +
+                String(n.id != null ? n.id : idx).replace(/'/g, "&#39;") +
+                "'><summary><span class='impact-badge " +
+                impCls +
+                "'>" +
+                imp +
+                "</span><span>[" +
+                cat +
+                "]</span><span class='src-chip'>" +
+                (n.sourceLabel || "").replace(/</g, "&lt;") +
+                "</span><span>" +
+                (n.title || "无标题").replace(/</g, "&lt;") +
+                "</span><span class='sent-badge " +
+                sb +
+                "'>" +
+                n.sentiment +
+                "</span><span class='sent-badge sent-neu'>" +
+                adv +
+                "</span>" +
+                (n.highRisk
+                  ? "<span class='sent-badge sent-neg' style='margin-left:0.25rem;'>高风险</span>"
+                  : "") +
+                "</summary><div class='news-body'>" +
+                body +
+                "</div><p class='fee-note' style='margin-top:0.35rem;'>匹配说明：" +
+                (n.matchReason || "—").replace(/</g, "&lt;") +
+                "</p><div style='margin-top:0.35rem;'><button type='button' class='btn btn-ghost btn-sm-record' data-idx='" +
+                idx +
+                "'>将本条建议记入胜率统计</button>" +
+                (n.url
+                  ? " <a href='" +
+                    String(n.url).replace(/'/g, "%27") +
+                    "' target='_blank' rel='noopener' style='color:var(--accent);font-size:0.8rem;'>打开原文</a>"
+                  : "") +
+                "</div></details>"
+              );
+            })
+            .join("")
+        : "<p class='fee-note'>该分类下暂无条目。</p>";
+      renderNewsPaginationBar(total, page, pageSize);
+      box.querySelectorAll(".btn-sm-record").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          const idx = Number(e.target.getAttribute("data-idx"));
+          const n = state.newsItems[idx];
+          if (!n) return;
+          const r = recordAdvice("新闻/公告", n.title, n.advice, n.adviceDetail || n.content);
+          if (r) showAlert("已记录建议，期满后将按页面顶部规则自动判定胜负。", "ok");
+          else showAlert("需要有效现价，且买入/卖出才会记入（中性不记）。", "bad");
+        });
+      });
+    }
+
+    function exportNewsMarkdownTable() {
+      const rows = getFilteredNewsRowsWithIndex().map(function (x) {
+        return x.n;
+      });
+      if (!rows.length) {
+        showAlert("暂无新闻可导出（当前分类下无条目）。", "bad");
+        return;
+      }
+      const head = "| 标题 | 来源 | 发布时间 | 潜在影响 | 高风险 | 链接 | 匹配理由 |\n|---|---|---|---|---|---|---|\n";
+      const body = rows
+        .map(function (n) {
+          const cells = [
+            n.title || "",
+            n.sourceLabel || "",
+            n.date || "",
+            n.stockImpact != null ? n.stockImpact : "?",
+            n.highRisk ? "是" : "否",
+            n.url || "",
+            n.matchReason || "",
+          ].map(function (c) {
+            return String(c)
+              .replace(/\|/g, "/")
+              .replace(/\r?\n/g, " ")
+              .trim();
+          });
+          return "| " + cells.join(" | ") + " |";
+        })
+        .join("\n");
+      const blob = new Blob([head + body], { type: "text/markdown;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "news-" + ($("stockCode").value || "stock").replace(/\D/g, "") + ".md";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showAlert("已下载 Markdown 表格。", "ok");
+    }
+
+    function mergeAnnListToNews(code, json, silent) {
+      if (!json || !json.data || !json.data.list) return false;
+      const list = json.data.list;
+      const merged = [];
+      const stockLabel = ($("stockName").value || "").trim() || code;
+      const code6 = String(code || "").replace(/\D/g, "").slice(0, 6);
+      for (const row of list) {
+        if (!row || typeof row !== "object") continue;
+        const title = (row.title || row.notice_title || row.secName || row.name || "").toString();
+        if (!title) continue;
+        const art = (row.art_code || row.notice_date || row.display_time || "").toString();
+        const url =
+          row.url ||
+          (row.art_code
+            ? "https://data.eastmoney.com/notices/detail/" + code + "/" + encodeURIComponent(row.art_code) + ".html"
+            : "");
+        const digest = (row.digest || row.summary || row.abstract || row.content || "").toString();
+        const fullTitle = stockLabel + "：" + title;
+        const imp = classifyNewsImpact(fullTitle, digest);
+        const m = impactToSentimentAdvice(imp.impact);
+        const parsed = Date.parse(art) || Date.parse(art.replace(/-/g, "/"));
+        merged.push({
+          id: "n_" + (row.art_code || title + art).toString().slice(0, 48).replace(/\W/g, "_"),
+          title: fullTitle,
+          content: digest || title,
+          url,
+          date: art,
+          category: "announce",
+          sourceLabel: "东方财富·公告",
+          stockImpact: imp.impact,
+          highRisk: imp.highRisk,
+          matchReason: imp.matchReason,
+          stockCode: code6,
+          pubTs: isFinite(parsed) ? parsed : Date.now(),
+          sentiment: m.sent,
+          advice: m.side,
+          adviceDetail: imp.matchReason,
+        });
+      }
+      const keep = (state.newsItems || []).filter((n) => n.category !== "announce");
+      let combined = merged.slice(0, 120).concat(keep);
+      combined.sort((a, b) => (b.pubTs || 0) - (a.pubTs || 0));
+      combined = dedupeNewsById(combined);
+      state.newsItems = combined.slice(0, NEWS_LIBRARY_MAX);
+      saveState(state);
+      renderNewsList();
+      renderAdviceWinRate();
+      if (!silent) showAlert("已更新 " + merged.length + " 条公司公告（已保留网页/手动条目）。", "ok");
+      return true;
+    }
+
+    function annApiUrl(code) {
+      return (
+        "https://np-anotice-stock.eastmoney.com/api/security/ann?sr=-1&page_size=25&page_index=1&ann_type=A&client_source=web&stock_list=" +
+        code
+      );
+    }
+
+    function fetchEastmoneyAnn(opts) {
+      const silent = !!(opts && opts.silent);
+      const code = $("stockCode").value.replace(/\D/g, "").slice(0, 6);
+      if (code.length !== 6) {
+        if (!silent) showAlert("请先填写 6 位股票代码。", "bad");
+        return;
+      }
+      const base = annApiUrl(code);
+      fetch(base)
+        .then((r) => r.json())
+        .then((json) => {
+          if (!mergeAnnListToNews(code, json, silent)) {
+            fetchEastmoneyAnnJsonp(code, silent);
+          }
+        })
+        .catch(() => fetchEastmoneyAnnJsonp(code, silent));
+    }
+
+    function fetchEastmoneyAnnJsonp(code, silent) {
+      const base = annApiUrl(code);
+      const cb = "em_ann_" + Date.now();
+      window[cb] = function (json) {
+        try {
+          delete window[cb];
+        } catch (e) {}
+        if (!mergeAnnListToNews(code, json, silent)) {
+          if (!silent) showAlert("公告接口无数据、被拦截或格式变化；可改用手机热点/浏览器，或仅用手动添加新闻。", "bad");
+        }
+      };
+      const script = document.createElement("script");
+      script.src = base + "&cb=" + cb;
+      script.onerror = () => {
+        try {
+          delete window[cb];
+        } catch (e) {}
+        if (!silent) showAlert("公告 JSONP 加载失败。", "bad");
+      };
+      document.head.appendChild(script);
+      setTimeout(() => {
+        try {
+          script.remove();
+        } catch (e) {}
+      }, 15000);
+    }
+
+    let autoAnnTimer = null;
+    let lastAnnFetchedForCode = null;
+    function scheduleAutoFetchAnnouncements(force) {
+      const code = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if (code.length !== 6) return;
+      if (autoAnnTimer) clearTimeout(autoAnnTimer);
+      if (force) lastAnnFetchedForCode = null;
+      autoAnnTimer = setTimeout(function () {
+        autoAnnTimer = null;
+        if (!force && lastAnnFetchedForCode === code) return;
+        lastAnnFetchedForCode = code;
+        fetchEastmoneyAnn({ silent: true });
+      }, 800);
+    }
+
+    function watchAddCurrentToEmptySlot() {
+      const code = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const name = ($("stockName").value || "").trim();
+      if (code.length !== 6) {
+        showAlert("请先在「标的与现价来源」填写 6 位代码。", "bad");
+        return;
+      }
+      const exist = state.watchlist.findIndex((s) => String(s.code || "").replace(/\D/g, "").slice(0, 6) === code);
+      if (exist >= 0 && exist !== state.activeWatchIndex) {
+        selectWatchSlot(exist);
+        showAlert("该代码已在自选第 " + (exist + 1) + " 格，已为你切换。", "ok");
+        return;
+      }
+      if (exist >= 0 && exist === state.activeWatchIndex) {
+        showAlert("当前格已是该代码。", "ok");
+        return;
+      }
+      const emptyIdx = state.watchlist.findIndex((s) => {
+        const c = String(s.code || "").replace(/\D/g, "").slice(0, 6);
+        return c.length !== 6;
+      });
+      if (emptyIdx < 0) {
+        showAlert(WATCH_SLOT_COUNT + " 个自选位已满。可先「删除当前格」或拖动整理后再添加。", "bad");
+        return;
+      }
+      flushCurrentSnapshot();
+      state.watchlist[emptyIdx] = { code, name };
+      saveState(state);
+      selectWatchSlot(emptyIdx);
+      showAlert("已放入第 " + (emptyIdx + 1) + " 格。", "ok");
+    }
+
+    function watchDeleteCurrentSlot() {
+      if (!confirm("确定清空当前自选格？（会切换到该空位并清空页面上的代码与本地快照）")) return;
+      flushCurrentSnapshot();
+      const i = Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0));
+      state.watchlist[i] = { code: "", name: "" };
+      saveState(state);
+      selectWatchSlot(i);
+      showAlert("已清空第 " + (i + 1) + " 格。", "ok");
+    }
+
+    function renderBuyPoints() {
+      const box = $("buyPointsList");
+      if (!box) return;
+      const arr = state.buyPoints || [];
+      if (!arr.length) {
+        box.innerHTML = "<span class='fee-note'>暂无自定义买点。</span>";
+        return;
+      }
+      box.innerHTML = arr
+        .map(
+          (b, i) =>
+            "<div class='bp-row'><span>" +
+            b.price.toFixed(3) +
+            " 元</span><span class='fee-note'>" +
+            (b.note || "").replace(/</g, "&lt;") +
+            "</span><button type='button' class='btn btn-ghost' data-bpi='" +
+            i +
+            "'>删除</button></div>"
+        )
+        .join("");
+      box.querySelectorAll("button[data-bpi]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const i = Number(btn.getAttribute("data-bpi"));
+          state.buyPoints.splice(i, 1);
+          saveState(state);
+          renderBuyPoints();
+          renderLiveAdviceTable();
+        });
+      });
+    }
+
+    function codeToListId(code) {
+      const c = String(code || "").replace(/\D/g, "");
+      if (c.length !== 6) return null;
+      if (c.startsWith("6")) return "sh" + c;
+      return "sz" + c;
+    }
+
+    function roundLot(shares, lot) {
+      const l = Math.max(1, Math.floor(Number(lot) || 100));
+      return Math.floor(Math.max(0, shares) / l) * l;
+    }
+
+    function nextAddLotShares(posShares, addMult, lotSize) {
+      if (posShares <= 0) return 0;
+      const am = addMult != null && addMult > 0 ? addMult : 1;
+      return roundLot(posShares * am, lotSize);
+    }
+
+    function effectivePrice() {
+      if ($("useManualPrice").checked) {
+        const v = $("currentPrice").value;
+        if (v !== "" && Number(v) > 0) return Number(v);
+      }
+      if (quote.price != null && quote.price > 0) return quote.price;
+      const v = $("currentPrice").value;
+      if (v !== "" && Number(v) > 0) return Number(v);
+      return null;
+    }
+
+    function getInputs() {
+      const st = state.settings;
+      const addMultRaw = Number($("addMult") && $("addMult").value);
+      const tpRaw = Number($("targetProfitPct") && $("targetProfitPct").value);
+      return {
+        stockName: $("stockName").value.trim() || st.stockName || "股票",
+        budget: Number($("budget").value) || 0,
+        entryPrice: Number($("entryPrice").value) || 0,
+        lotSize: Math.max(1, Math.floor(Number($("lotSize").value) || 100)),
+        dropPct: Number($("dropPct").value) || 20,
+        bouncePct: Number($("bouncePct").value) || 5,
+        sellHalfPct: Math.min(100, Math.max(1, Number($("sellHalfPct").value) || 50)),
+        addMult: isFinite(addMultRaw) && addMultRaw > 0 ? addMultRaw : st.addMult || 1,
+        targetProfitPct: isFinite(tpRaw) && tpRaw > 0 ? tpRaw : st.targetProfitPct || 5,
+        currentPrice: effectivePrice(),
+        lowWaterManual: $("lowWater").value === "" ? null : Number($("lowWater").value),
+      };
+    }
+
+    function persistSettingsFromForm() {
+      state.settings.stockCode = $("stockCode").value.replace(/\D/g, "").slice(0, 6);
+      state.settings.stockName = $("stockName").value.trim() || state.settings.stockName;
+      state.settings.autoRefresh = $("autoRefresh").checked;
+      state.settings.refreshSec = normalizeRefreshSec($("refreshSec").value);
+      state.settings.useManualPrice = $("useManualPrice").checked;
+      state.settings.evalDays = Number($("evalDays").value) || 20;
+      state.settings.winThresholdPct = Number($("winThresholdPct").value) || 2;
+      if ($("addMult")) {
+        const m = Number($("addMult").value);
+        state.settings.addMult = isFinite(m) && m > 0 ? m : 1;
+      }
+      if ($("targetProfitPct")) {
+        const t = Number($("targetProfitPct").value);
+        state.settings.targetProfitPct = isFinite(t) && t > 0 ? t : 5;
+      }
+      if ($("newsSector")) state.settings.newsSector = $("newsSector").value.trim();
+      if ($("newsKeywords")) state.settings.newsKeywords = $("newsKeywords").value.trim();
+      if ($("newsWindowDays")) {
+        const w = Number($("newsWindowDays").value);
+        state.settings.newsWindowDays = w === 1 ? 1 : 7;
+      }
+      if ($("newsRss2JsonKey")) state.settings.newsRss2JsonKey = $("newsRss2JsonKey").value.trim();
+      if ($("newsPageSizeSelect")) state.settings.newsPageSize = coerceNewsPageSize($("newsPageSizeSelect").value);
+      saveState(state);
+    }
+
+    function applySettingsToForm() {
+      const st = state.settings;
+      $("stockCode").value = st.stockCode || "002470";
+      $("stockName").value = st.stockName || "金正大";
+      $("autoRefresh").checked = st.autoRefresh !== false;
+      $("refreshSec").value = String(normalizeRefreshSec(st.refreshSec));
+      $("useManualPrice").checked = !!st.useManualPrice;
+      if ($("evalDays")) $("evalDays").value = String(st.evalDays || 20);
+      if ($("winThresholdPct")) $("winThresholdPct").value = String(st.winThresholdPct ?? 2);
+      if ($("addMult")) $("addMult").value = String(st.addMult != null ? st.addMult : 1);
+      if ($("targetProfitPct")) $("targetProfitPct").value = String(st.targetProfitPct != null ? st.targetProfitPct : 5);
+      if ($("newsSector")) $("newsSector").value = String(st.newsSector || "");
+      if ($("newsKeywords")) $("newsKeywords").value = String(st.newsKeywords || "");
+      if ($("newsWindowDays")) $("newsWindowDays").value = String(st.newsWindowDays === 1 ? 1 : 7);
+      if ($("newsRss2JsonKey")) $("newsRss2JsonKey").value = String(st.newsRss2JsonKey || "");
+      if ($("newsPageSizeSelect")) $("newsPageSizeSelect").value = String(coerceNewsPageSize(st.newsPageSize));
+      syncNewsCatTabButtons();
+      applyIntroTogglesFromSettings();
+    }
+
+    function flushCurrentSnapshot() {
+      saveState(state);
+    }
+
+    function loadSnapshotForStock(key, displayName) {
+      const snap = state.stockSnapshots && state.stockSnapshots[key];
+      state.ledger = snap && Array.isArray(snap.ledger) ? JSON.parse(JSON.stringify(snap.ledger)) : [];
+      state.buyPoints = snap && Array.isArray(snap.buyPoints) ? JSON.parse(JSON.stringify(snap.buyPoints)) : [];
+      state.adviceHistory = snap && Array.isArray(snap.adviceHistory) ? JSON.parse(JSON.stringify(snap.adviceHistory)) : [];
+      state.newsItems = snap && Array.isArray(snap.newsItems) ? JSON.parse(JSON.stringify(snap.newsItems)) : [];
+      state.settings.stockCode = key;
+      state.settings.stockName = (displayName || "").trim() || (snap && snap.stockName) || key;
+      $("stockCode").value = key;
+      $("stockName").value = state.settings.stockName;
+      if (snap) {
+        if (snap.budget != null && $("budget")) $("budget").value = String(snap.budget);
+        if (snap.entryPrice != null && $("entryPrice")) $("entryPrice").value = String(snap.entryPrice);
+        if ($("lowWater")) $("lowWater").value = snap.lowWater != null && snap.lowWater !== "" ? String(snap.lowWater) : "";
+      }
+      state.activeStockCode = key;
+      normalizeAllNewsItemsInState();
+    }
+
+    function syncActiveSlotFromForm() {
+      const code = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const name = ($("stockName").value || "").trim();
+      const i = Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0));
+      state.watchlist[i] = { code, name: name || state.watchlist[i].name || "" };
+    }
+
+    function ensureActiveStockKeyFromForm() {
+      const c = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if (c.length === 6) state.activeStockCode = c;
+    }
+
+    function remapWatchActiveIndex(active, from, to) {
+      if (active === from) return to;
+      if (from < to) {
+        if (active > from && active <= to) return active - 1;
+      } else if (from > to) {
+        if (active >= to && active < from) return active + 1;
+      }
+      return active;
+    }
+
+    let watchDrag = null;
+    let watchSuppressClick = false;
+    let watchQuoteTimer = null;
+
+    function renderWatchlistCards() {
+      const list = $("watchCardList");
+      if (!list) return;
+      list.innerHTML = "";
+      const activeIdx = Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0));
+      for (let i = 0; i < WATCH_SLOT_COUNT; i++) {
+        const slot = state.watchlist[i] || { code: "", name: "" };
+        const code6 = String(slot.code || "").replace(/\D/g, "").slice(0, 6);
+        const cq = code6.length === 6 ? cardQuotes[code6] : null;
+        let stripCls = "flat";
+        let pctCls = "flat";
+        let pctText = "—";
+        let priceText = "—";
+        if (code6.length === 6 && cq) {
+          if (cq.price != null && isFinite(cq.price)) priceText = cq.price.toFixed(3);
+          if (cq.pct != null && isFinite(cq.pct)) {
+            const sign = cq.pct >= 0 ? "+" : "";
+            pctText = sign + cq.pct.toFixed(2) + "%";
+            if (cq.pct > 0) {
+              stripCls = "up";
+              pctCls = "up";
+            } else if (cq.pct < 0) {
+              stripCls = "down";
+              pctCls = "down";
+            }
+          }
+        }
+        let title = "空位 · 点选后填代码";
+        if (code6) {
+          const qn = cq && cq.name && String(cq.name).trim();
+          const sn = slot.name && String(slot.name).trim();
+          title = qn || sn || code6;
+        }
+        const card = document.createElement("div");
+        card.className = "watch-card" + (i === activeIdx ? " watch-card--active" : "");
+        card.dataset.index = String(i);
+        const m = computeWatchCardMetrics(code6, cq);
+        const pctChgCls = pctCls === "up" ? "a-up" : pctCls === "down" ? "a-down" : "a-flat";
+        const priceCell =
+          code6.length === 6
+            ? '<span class="wc-price-big">' + escapeHtml(priceText) + '</span><span class="wc-price-unit">元</span>'
+            : '<span class="wc-price-big">' + escapeHtml(priceText) + "</span>";
+        card.innerHTML =
+          '<div class="watch-card-inner"><div class="watch-card-grip" title="拖动排序">⋮⋮</div><div class="watch-card-main" tabindex="0" role="button">' +
+          '<div class="watch-card-grid">' +
+          '<div class="wc-l1"><div class="watch-card-title">' +
+          escapeHtml(title) +
+          "</div></div>" +
+          '<div class="wc-r1"><span class="wc-meta-lbl">当日盈亏</span><span class="wc-meta-val ' +
+          m.dCls +
+          '">' +
+          escapeHtml(m.dAmtT) +
+          "</span></div>" +
+          '<div class="wc-l2"><div class="watch-card-code">' +
+          (code6 ? escapeHtml(code6) : "—") +
+          "</div></div>" +
+          '<div class="wc-r2"><span class="wc-meta-lbl">持仓盈亏</span><span class="wc-meta-val ' +
+          m.tCls +
+          '">' +
+          escapeHtml(m.tAmtT) +
+          "</span></div>" +
+          '<div class="wc-l3">' +
+          priceCell +
+          "</div>" +
+          '<div class="wc-r3"><span class="wc-meta-lbl">当日涨幅</span><span class="wc-pct-chg ' +
+          pctChgCls +
+          '">' +
+          escapeHtml(pctText) +
+          "</span></div>" +
+          "</div></div></div>" +
+          '<div class="watch-card-strip ' +
+          stripCls +
+          '"></div>';
+        list.appendChild(card);
+      }
+
+      list.querySelectorAll(".watch-card-grip").forEach((grip) => {
+        grip.addEventListener("pointerdown", onWatchGripDown);
+      });
+      list.querySelectorAll(".watch-card-main").forEach((main) => {
+        main.addEventListener("click", onWatchCardClick);
+        main.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            main.click();
+          }
+        });
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function formatWatchThsAmount(n) {
+      if (n == null || !isFinite(n)) return "—";
+      const rounded = Math.round(n * 100) / 100;
+      if (Math.abs(rounded) < 1e-9) return "0.00";
+      const sign = rounded > 0 ? "+" : "-";
+      const body = Math.abs(rounded).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return sign + body;
+    }
+
+    function formatWatchThsPct(n) {
+      if (n == null || !isFinite(n)) return "—";
+      const rounded = Math.round(n * 100) / 100;
+      if (Math.abs(rounded) < 1e-9) return "0.00%";
+      const sign = rounded > 0 ? "+" : "-";
+      return sign + Math.abs(rounded).toFixed(2) + "%";
+    }
+
+    function tongPnlClassFromAmount(n) {
+      if (n == null || !isFinite(n)) return "tong-flat";
+      if (n > 1e-8) return "tong-profit";
+      if (n < -1e-8) return "tong-loss";
+      return "tong-flat";
+    }
+
+    function computeWatchCardMetrics(code6, cq) {
+      const r = { dAmtT: "—", tAmtT: "—", dCls: "tong-flat", tCls: "tong-flat" };
+      if (code6.length !== 6) return r;
+      const snap = state.stockSnapshots && state.stockSnapshots[code6];
+      const ledger = snap && Array.isArray(snap.ledger) ? snap.ledger : [];
+      const pos = aggregatePosition(ledger, 100);
+      const price = cq && cq.price != null && isFinite(cq.price) ? cq.price : null;
+      const prevClose = cq && cq.prevClose != null && isFinite(cq.prevClose) ? cq.prevClose : null;
+      if (pos.shares <= 0) return r;
+
+      let dAmt = null;
+      if (price != null && prevClose != null && prevClose > 0) {
+        dAmt = pos.shares * (price - prevClose);
+      }
+      let tAmt = null;
+      if (price != null && pos.costBasis > 0) {
+        tAmt = price * pos.shares - pos.costBasis;
+      }
+
+      r.dAmtT = dAmt != null ? formatWatchThsAmount(dAmt) : "—";
+      r.tAmtT = tAmt != null ? formatWatchThsAmount(tAmt) : "—";
+      r.dCls = dAmt != null ? tongPnlClassFromAmount(dAmt) : "tong-flat";
+      r.tCls = tAmt != null ? tongPnlClassFromAmount(tAmt) : "tong-flat";
+      return r;
+    }
+
+    function onWatchCardClick(e) {
+      if (watchSuppressClick) {
+        watchSuppressClick = false;
+        return;
+      }
+      const card = e.currentTarget.closest(".watch-card");
+      if (!card) return;
+      selectWatchSlot(Number(card.dataset.index));
+    }
+
+    function selectWatchSlot(index) {
+      if (index < 0 || index >= WATCH_SLOT_COUNT) return;
+      flushCurrentSnapshot();
+      state.activeWatchIndex = index;
+      const slot = state.watchlist[index] || { code: "", name: "" };
+      const code6 = String(slot.code || "").replace(/\D/g, "").slice(0, 6);
+      if (code6.length === 6) {
+        loadSnapshotForStock(code6, slot.name);
+      } else {
+        state.ledger = [];
+        state.buyPoints = [];
+        state.adviceHistory = [];
+        state.newsItems = [];
+        $("stockCode").value = slot.code || "";
+        $("stockName").value = slot.name || "";
+        state.settings.stockCode = $("stockCode").value.replace(/\D/g, "").slice(0, 6);
+        state.settings.stockName = $("stockName").value.trim() || "";
+        state.activeStockCode = "";
+      }
+      persistSettingsFromForm();
+      state.settings.newsListPage = 1;
+      saveState(state);
+      $("heroName").textContent = $("stockName").value.trim() || "—";
+      refreshPlanAndLedgerFromState();
+      renderWatchlistCards();
+      fetchQuote();
+      refreshKlineCharts();
+      scheduleWatchQuotesRefresh();
+      if (code6.length === 6) scheduleAutoFetchAnnouncements(true);
+      else lastAnnFetchedForCode = null;
+      renderNewsList();
+      renderInferredWebTagsBar();
+    }
+
+    function onWatchGripDown(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const grip = e.currentTarget;
+      const card = grip.closest(".watch-card");
+      const list = $("watchCardList");
+      if (!card || !list) return;
+      const index = Number(card.dataset.index);
+      const rect = card.getBoundingClientRect();
+      const gap = 10;
+      const itemH = rect.height + gap;
+      watchDrag = {
+        index,
+        itemH,
+        listEl: list,
+        startY: e.clientY,
+        grabY: e.clientY - rect.top,
+        lastTarget: index,
+        pointerId: e.pointerId,
+      };
+      card.classList.add("watch-card--dragging");
+      try {
+        card.setPointerCapture(e.pointerId);
+      } catch (err) {}
+      card.addEventListener("pointermove", onWatchDragMove);
+      card.addEventListener("pointerup", onWatchDragUp);
+      card.addEventListener("pointercancel", onWatchDragUp);
+    }
+
+    function onWatchDragMove(e) {
+      if (!watchDrag) return;
+      const { index, itemH, listEl, startY } = watchDrag;
+      const dy = e.clientY - startY;
+      const dragged = listEl.children[index];
+      if (dragged) dragged.style.transform = "translateY(" + dy + "px)";
+      const listRect = listEl.getBoundingClientRect();
+      const rel = e.clientY - listRect.top - watchDrag.grabY;
+      let target = Math.round(rel / itemH);
+      target = Math.max(0, Math.min(WATCH_SLOT_COUNT - 1, target));
+      watchDrag.lastTarget = target;
+      for (let i = 0; i < listEl.children.length; i++) {
+        const el = listEl.children[i];
+        if (i === index) continue;
+        let shift = 0;
+        if (index < target) {
+          if (i > index && i <= target) shift = -itemH;
+        } else if (index > target) {
+          if (i >= target && i < index) shift = itemH;
+        }
+        el.style.transform = shift ? "translateY(" + shift + "px)" : "";
+        el.style.transition = "transform 0.08s ease-out";
+      }
+    }
+
+    function onWatchDragUp(e) {
+      if (!watchDrag) return;
+      const { index, listEl, pointerId, lastTarget } = watchDrag;
+      const card = e.currentTarget;
+      try {
+        card.releasePointerCapture(pointerId);
+      } catch (err) {}
+      card.removeEventListener("pointermove", onWatchDragMove);
+      card.removeEventListener("pointerup", onWatchDragUp);
+      card.removeEventListener("pointercancel", onWatchDragUp);
+      for (let i = 0; i < listEl.children.length; i++) {
+        const el = listEl.children[i];
+        el.style.transform = "";
+        el.style.transition = "";
+        el.classList.remove("watch-card--dragging");
+      }
+      const to = lastTarget != null ? lastTarget : index;
+      watchDrag = null;
+      if (index !== to) {
+        watchSuppressClick = true;
+        const item = state.watchlist.splice(index, 1)[0];
+        state.watchlist.splice(to, 0, item);
+        state.activeWatchIndex = remapWatchActiveIndex(state.activeWatchIndex, index, to);
+        saveState(state);
+        renderWatchlistCards();
+        const moved = listEl.children[to];
+        if (moved) {
+          moved.classList.add("watch-card--snap");
+          setTimeout(() => moved.classList.remove("watch-card--snap"), 500);
+        }
+        scheduleWatchQuotesRefresh();
+      } else {
+        renderWatchlistCards();
+      }
+    }
+
+    function pushQuoteToCardCache() {
+      const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if (code6.length !== 6 || quote.price == null || !isFinite(quote.price)) return;
+      const p = quote.price;
+      const prev = quote.prevClose;
+      let pct = null;
+      if (prev != null && prev > 0) pct = ((p - prev) / prev) * 100;
+      const qn = quote.apiName && String(quote.apiName).trim();
+      const prevCard = cardQuotes[code6] || {};
+      cardQuotes[code6] = {
+        price: p,
+        pct,
+        prevClose: prev != null && isFinite(prev) ? prev : null,
+        name: qn || prevCard.name || null,
+        updated: Date.now(),
+      };
+    }
+
+    function fetchMiniQuoteForCard(code6, done) {
+      const listId = codeToListId(code6);
+      if (!listId) {
+        if (done) done();
+        return;
+      }
+      loadQuoteTencent(listId, (err, data) => {
+        if (!err && data) {
+          const p = data.price;
+          const prev = data.prevClose;
+          let pct = null;
+          if (p != null && prev != null && prev > 0) pct = ((p - prev) / prev) * 100;
+          const nm = data.apiName && String(data.apiName).trim();
+          const prevCard = cardQuotes[code6] || {};
+          cardQuotes[code6] = {
+            price: p,
+            pct,
+            prevClose: prev != null && isFinite(prev) ? prev : null,
+            name: nm || prevCard.name || null,
+            updated: Date.now(),
+          };
+          if (done) done();
+          return;
+        }
+        loadQuoteSina(listId, (e2, data2) => {
+          if (!e2 && data2) {
+            const p = data2.price;
+            const prev = data2.prevClose;
+            let pct = null;
+            if (p != null && prev != null && prev > 0) pct = ((p - prev) / prev) * 100;
+            const nm = data2.apiName && String(data2.apiName).trim();
+            const prevCard = cardQuotes[code6] || {};
+            cardQuotes[code6] = {
+              price: p,
+              pct,
+              prevClose: prev != null && isFinite(prev) ? prev : null,
+              name: nm || prevCard.name || null,
+              updated: Date.now(),
+            };
+          } else {
+            cardQuotes[code6] = { price: null, pct: null, prevClose: null, name: null, updated: Date.now(), err: true };
+          }
+          if (done) done();
+        });
+      });
+    }
+
+    function scheduleWatchQuotesRefresh() {
+      if (watchQuoteTimer) clearTimeout(watchQuoteTimer);
+      watchQuoteTimer = setTimeout(refreshAllWatchQuotes, 80);
+    }
+
+    function refreshAllWatchQuotes() {
+      watchQuoteTimer = null;
+      const codes = [
+        ...new Set(
+          state.watchlist.map((w) => String(w.code || "").replace(/\D/g, "").slice(0, 6)).filter((c) => c.length === 6)
+        ),
+      ];
+      let i = 0;
+      function next() {
+        if (i >= codes.length) {
+          renderWatchlistCards();
+          return;
+        }
+        const c = codes[i++];
+        fetchMiniQuoteForCard(c, () => {
+          renderWatchlistCards();
+          setTimeout(next, 100);
+        });
+      }
+      next();
+    }
+
+    function onMainStockIdentityCommitted() {
+      lastAlertZone = null;
+      flushCurrentSnapshot();
+      persistSettingsFromForm();
+      state.settings.newsListPage = 1;
+      syncActiveSlotFromForm();
+      const code = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if (code.length === 6) {
+        loadSnapshotForStock(code, $("stockName").value.trim());
+      } else {
+        state.ledger = [];
+        state.buyPoints = [];
+        state.adviceHistory = [];
+        state.newsItems = [];
+        state.activeStockCode = "";
+        lastAnnFetchedForCode = null;
+      }
+      saveState(state);
+      $("heroName").textContent = $("stockName").value.trim() || "—";
+      refreshPlanAndLedgerFromState();
+      renderWatchlistCards();
+      fetchQuote();
+      refreshKlineCharts();
+      scheduleWatchQuotesRefresh();
+      if (code.length === 6) scheduleAutoFetchAnnouncements(true);
+      renderNewsList();
+      renderInferredWebTagsBar();
+    }
+
+    function aggregatePosition(ledger, lotSize) {
+      let shares = 0;
+      let costBasis = 0;
+      let minBuyPrice = null;
+      let lastBuyPrice = null;
+      for (const e of ledger) {
+        if (e.type === "buy") {
+          shares += e.shares;
+          costBasis += e.shares * e.price;
+          minBuyPrice = minBuyPrice == null ? e.price : Math.min(minBuyPrice, e.price);
+          lastBuyPrice = e.price;
+        } else if (e.type === "sell") {
+          const avg = shares > 0 ? costBasis / shares : 0;
+          shares -= e.shares;
+          costBasis -= avg * e.shares;
+          if (shares < 0) shares = 0;
+          if (costBasis < 0) costBasis = 0;
+        }
+      }
+      const avgPrice = shares > 0 ? costBasis / shares : 0;
+      return { shares, costBasis, minBuyPrice, lastBuyPrice, avgPrice };
+    }
+
+    function buildPlan(cfg) {
+      const { budget, entryPrice, lotSize, dropPct, addMult } = cfg;
+      if (budget <= 0 || entryPrice <= 0) return [];
+      const mult = 1 - dropPct / 100;
+      const am = addMult != null && addMult > 0 ? addMult : 1;
+      const initialShares = roundLot(budget / entryPrice, lotSize);
+      if (initialShares <= 0) return [];
+
+      const rows = [];
+      let totalShares = initialShares;
+      let totalCost = initialShares * entryPrice;
+      let refPrice = entryPrice;
+
+      rows.push({
+        stage: "初始",
+        triggerPrice: entryPrice,
+        action: "买入",
+        tradeShares: initialShares,
+        amount: totalCost,
+        totalShares,
+        totalCost,
+        avg: totalCost / totalShares,
+      });
+
+      for (let i = 1; i <= 12; i++) {
+        const trigger = refPrice * mult;
+        const lotBuy = roundLot(totalShares * am, lotSize);
+        if (lotBuy <= 0) break;
+        const amount = lotBuy * trigger;
+        totalShares += lotBuy;
+        totalCost += amount;
+        refPrice = trigger;
+        let act = "加仓";
+        if (Math.abs(am - 1) < 0.0001) act += "（约一倍）";
+        else act += "（×" + am + " 倍持仓股数）";
+        rows.push({
+          stage: `第${i}次加仓`,
+          triggerPrice: trigger,
+          action: act,
+          tradeShares: lotBuy,
+          amount,
+          totalShares,
+          totalCost,
+          avg: totalCost / totalShares,
+        });
+      }
+      return rows;
+    }
+
+    function nextBuyTrigger(lastBuyPrice, dropPct) {
+      if (lastBuyPrice == null || lastBuyPrice <= 0) return null;
+      return lastBuyPrice * (1 - dropPct / 100);
+    }
+
+    function nextSellTrigger(lowPrice, bouncePct) {
+      if (lowPrice == null || lowPrice <= 0) return null;
+      return lowPrice * (1 + bouncePct / 100);
+    }
+
+    function defaultSellShares(totalShares, sellPct, lotSize) {
+      return roundLot(totalShares * (sellPct / 100), lotSize);
+    }
+
+    function showAlert(msg, type) {
+      const bar = $("alertBar");
+      bar.className = "alert-bar show " + (type || "info");
+      bar.textContent = msg;
+    }
+
+    function hideAlert() {
+      $("alertBar").className = "alert-bar";
+    }
+
+    function maybeNotify(title, body) {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      new Notification(title, { body });
+    }
+
+    function loadQuoteTencent(listId, cb) {
+      const globalKey = "v_" + listId;
+      const script = document.createElement("script");
+      script.src = "https://qt.gtimg.cn/q=" + encodeURIComponent(listId);
+      const t = setTimeout(() => {
+        script.remove();
+        cb(new Error("腾讯行情超时"));
+      }, 10000);
+      script.onerror = () => {
+        clearTimeout(t);
+        script.remove();
+        cb(new Error("腾讯行情加载失败"));
+      };
+      script.onload = () => {
+        clearTimeout(t);
+        const raw = window[globalKey];
+        script.remove();
+        if (typeof raw !== "string") {
+          cb(new Error("腾讯无数据"));
+          return;
+        }
+        const parts = raw.split("~");
+        const name = (parts[1] || "").trim();
+        const price = parseFloat(parts[3]);
+        const prev = parseFloat(parts[4]);
+        if (!isFinite(price)) {
+          cb(new Error("腾讯解析失败"));
+          return;
+        }
+        cb(null, {
+          price,
+          prevClose: isFinite(prev) ? prev : null,
+          apiName: name || null,
+          source: "腾讯行情",
+        });
+      };
+      document.head.appendChild(script);
+    }
+
+    function loadQuoteSina(listId, cb) {
+      const globalKey = "hq_str_" + listId;
+      const script = document.createElement("script");
+      script.charset = "gb2312";
+      script.src = "https://hq.sinajs.cn/list=" + encodeURIComponent(listId);
+      const t = setTimeout(() => {
+        script.remove();
+        cb(new Error("新浪行情超时"));
+      }, 10000);
+      script.onerror = () => {
+        clearTimeout(t);
+        script.remove();
+        cb(new Error("新浪行情加载失败"));
+      };
+      script.onload = () => {
+        clearTimeout(t);
+        const raw = window[globalKey];
+        script.remove();
+        if (typeof raw !== "string" || raw.length < 5) {
+          cb(new Error("新浪无数据"));
+          return;
+        }
+        const parts = raw.split(",");
+        const price = parseFloat(parts[3]);
+        const prev = parseFloat(parts[2]);
+        if (!isFinite(price)) {
+          cb(new Error("新浪解析失败"));
+          return;
+        }
+        cb(null, {
+          price,
+          prevClose: isFinite(prev) ? prev : null,
+          apiName: (parts[0] || "").trim() || null,
+          source: "新浪行情",
+        });
+      };
+      document.head.appendChild(script);
+    }
+
+    function fetchQuote() {
+      const listId = codeToListId($("stockCode").value);
+      $("heroListId").textContent = listId || "—";
+      const c6hero = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if ($("heroCode6")) $("heroCode6").textContent = c6hero.length === 6 ? c6hero : "—";
+      if (!listId) {
+        quote = { ...quote, error: "代码应为 6 位数字", updated: Date.now() };
+        renderQuoteHero();
+        renderWatchlistCards();
+        return;
+      }
+      loadQuoteTencent(listId, (err, data) => {
+        if (!err && data) {
+          quote = { ...data, error: null, updated: Date.now() };
+          renderQuoteHero();
+          pushQuoteToCardCache();
+          renderWatchlistCards();
+          onQuoteUpdated();
+          scheduleWatchQuotesRefresh();
+          return;
+        }
+        loadQuoteSina(listId, (err2, data2) => {
+          if (!err2 && data2) {
+            quote = { ...data2, error: null, updated: Date.now() };
+          } else {
+            quote = { ...quote, error: (err && err.message) + "；" + (err2 && err2.message), updated: Date.now() };
+          }
+          renderQuoteHero();
+          pushQuoteToCardCache();
+          renderWatchlistCards();
+          onQuoteUpdated();
+          scheduleWatchQuotesRefresh();
+        });
+      });
+    }
+
+    function applyQuoteNameFromTicker() {
+      if (!quote || quote.price == null || !isFinite(quote.price)) return;
+      const nm = quote.apiName && String(quote.apiName).trim();
+      if (!nm) return;
+      const cur = ($("stockName").value || "").trim();
+      if (cur === nm) {
+        syncActiveSlotFromForm();
+        return;
+      }
+      $("stockName").value = nm;
+      state.settings.stockName = nm;
+      syncActiveSlotFromForm();
+      saveState(state);
+    }
+
+    function renderQuoteHero() {
+      const meta = $("heroMeta");
+      const priceEl = $("heroPrice");
+      const chgEl = $("heroChg");
+      const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+      if ($("heroCode6")) $("heroCode6").textContent = code6.length === 6 ? code6 : "—";
+
+      if (quote.error && quote.price == null) {
+        meta.innerHTML = "<span class=\"err\">" + quote.error + "</span> · 可勾选「手动价格」";
+        priceEl.innerHTML = "—<span class=\"unit\">元</span>";
+        chgEl.className = "chg-pill flat";
+        chgEl.textContent = "—";
+        const fallbackName = ($("stockName").value || "").trim() || "—";
+        $("heroName").textContent = fallbackName;
+        return;
+      }
+      const p = quote.price;
+      const prev = quote.prevClose;
+      let pct = null;
+      if (p != null && prev != null && prev > 0) pct = ((p - prev) / prev) * 100;
+      priceEl.innerHTML = (p != null ? p.toFixed(3) : "—") + '<span class="unit">元</span>';
+      if (pct == null || !isFinite(pct)) {
+        chgEl.className = "chg-pill flat";
+        chgEl.textContent = "—";
+      } else {
+        const sign = pct >= 0 ? "+" : "";
+        chgEl.className = "chg-pill " + (pct > 0 ? "up" : pct < 0 ? "down" : "flat");
+        chgEl.textContent = sign + pct.toFixed(2) + "%";
+      }
+      applyQuoteNameFromTicker();
+      const showName =
+        (quote.apiName && String(quote.apiName).trim()) || ($("stockName").value || "").trim() || "—";
+      $("heroName").textContent = showName;
+      const t = quote.updated ? new Date(quote.updated).toLocaleString("zh-CN") : "";
+      const api = quote.apiName ? " · 行情简称 " + quote.apiName : "";
+      meta.textContent = (quote.source || "") + api + (t ? " · 更新 " + t : "");
+    }
+
+    function strategyZone(cfg, pos) {
+      const p = cfg.currentPrice;
+      if (pos.shares <= 0) return { zone: "idle", title: "尚未登记持仓", desc: "请先点「登记初始建仓」，或等待有效现价。" };
+      if (p == null || p <= 0) return { zone: "idle", title: "等待有效现价", desc: "正在拉取行情，或请勾选手动价格并填写。" };
+
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0 ? cfg.lowWaterManual : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+
+      if (nb != null && p <= nb) {
+        const lotBuy = nextAddLotShares(pos.shares, cfg.addMult, cfg.lotSize);
+        return {
+          zone: "hit-buy",
+          title: "已触及加仓参考区",
+          desc: `现价 ${p.toFixed(3)} ≤ 下一加仓参考 ${nb.toFixed(3)}。若执行约买 ${lotBuy} 股，按现价约 ${(lotBuy * p).toFixed(2)} 元。`,
+        };
+      }
+      if (ns != null && p >= ns) {
+        const ss = defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize);
+        return {
+          zone: "hit-sell",
+          title: "已触及减仓参考区",
+          desc: `现价 ${p.toFixed(3)} ≥ 减仓参考 ${ns.toFixed(3)}。若按策略卖出 ${cfg.sellHalfPct}% 持仓（约 ${ss} 股），按现价约回笼 ${(ss * p).toFixed(2)} 元。`,
+        };
+      }
+
+      if (nb != null && ns != null && ns > nb) {
+        const span = ns - nb;
+        const x = Math.min(1, Math.max(0, (p - nb) / span));
+        let near = "watch";
+        let title = "中性观望";
+        let desc = `现价 ${p.toFixed(3)} 介于加仓线 ${nb.toFixed(3)} 与减仓线 ${ns.toFixed(3)} 之间。`;
+        if (x < 0.25) {
+          near = "near-buy";
+          title = "更靠近加仓一侧";
+          desc += ` 距离加仓线约 ${((p - nb) / nb * 100).toFixed(2)}%（相对加仓价）。`;
+        } else if (x > 0.75) {
+          near = "near-sell";
+          title = "更靠近减仓一侧";
+          desc += ` 距离减仓线约 ${((ns - p) / p * 100).toFixed(2)}%（相对现价）。`;
+        }
+        return { zone: near, title, desc, bar: x * 100 };
+      }
+
+      return { zone: "watch", title: "无法计算区间", desc: "请确认已有买入成交，或填写持仓最低价。", bar: 0 };
+    }
+
+    function onQuoteUpdated() {
+      const cfg = getInputs();
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const sig = strategyZone(cfg, pos);
+      const box = $("signalBox");
+      box.className = "signal state-" + (sig.zone === "near-buy" ? "near-buy" : sig.zone === "near-sell" ? "near-sell" : sig.zone === "hit-buy" ? "hit-buy" : sig.zone === "hit-sell" ? "hit-sell" : sig.zone === "idle" ? "idle" : "watch");
+      $("signalTitle").textContent = sig.title;
+      $("signalDesc").textContent = sig.desc;
+      $("signalBar").style.width = (sig.bar != null ? sig.bar : 50) + "%";
+
+      const z = sig.zone;
+      if ((z === "hit-buy" || z === "hit-sell") && lastAlertZone !== z) {
+        maybeNotify($("stockName").value.trim() + " · 策略参考", sig.desc);
+        lastAlertZone = z;
+      } else if (z !== "hit-buy" && z !== "hit-sell") {
+        lastAlertZone = null;
+      }
+
+      renderKeyLevels(cfg, pos);
+      renderPlan();
+      renderLedger();
+      refreshKlineCharts();
+    }
+
+    function renderKeyLevels(cfg, pos) {
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0 ? cfg.lowWaterManual : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+      const lotBuy = nextAddLotShares(pos.shares, cfg.addMult, cfg.lotSize);
+      const needBuy = nb != null && pos.shares > 0 ? (lotBuy * nb).toFixed(2) : "—";
+      const ss = pos.shares > 0 ? defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize) : 0;
+      const sellAt = cfg.currentPrice != null && ss > 0 ? (ss * cfg.currentPrice).toFixed(2) : "—";
+      const p = cfg.currentPrice;
+      let chipBuy = "—";
+      let chipSell = "—";
+      if (p != null && p > 0 && nb != null) {
+        const pct = ((nb - p) / p) * 100;
+        chipBuy = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+      }
+      if (p != null && p > 0 && ns != null) {
+        const pct = ((ns - p) / p) * 100;
+        chipSell = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+      }
+
+      $("keyLevels").innerHTML = `
+        <div class="kv buy-zone">
+          <div class="k kv-head-row">
+            <span>下一加仓参考价</span>
+            <span class="pct-chip buy" title="相对现价：(参考价−现价)/现价，负表示现价高于参考、需下跌才触发">较现价 ${chipBuy}</span>
+          </div>
+          <div class="v">${nb != null ? nb.toFixed(3) : "—"}</div>
+          <div class="k" style="margin-top:0.35rem">若触发 · 股数 / 约需资金</div>
+          <div class="v sm">${pos.shares > 0 ? lotBuy + " 股 · " + needBuy + " 元" : "—"}</div>
+        </div>
+        <div class="kv sell-zone">
+          <div class="k kv-head-row">
+            <span>减仓参考价（反弹）</span>
+            <span class="pct-chip sell" title="相对现价：(参考价−现价)/现价，正表示现价低于参考、需上涨才触发">较现价 ${chipSell}</span>
+          </div>
+          <div class="v">${ns != null ? ns.toFixed(3) : "—"}</div>
+          <div class="k" style="margin-top:0.35rem">若按现价卖持仓 ${cfg.sellHalfPct}% · 约回笼</div>
+          <div class="v sm">${pos.shares > 0 ? ss + " 股 · " + sellAt + " 元" : "—"}</div>
+        </div>
+      `;
+    }
+
+    function renderPlan() {
+      const cfg = getInputs();
+      const body = $("planBody");
+      body.innerHTML = "";
+      const plan = buildPlan(cfg);
+      if (!plan.length) {
+        body.innerHTML = "<tr><td colspan='8' style='text-align:left;color:var(--muted)'>请检查预算、价格与一手股数。</td></tr>";
+        return;
+      }
+      const p = cfg.currentPrice;
+      for (const r of plan) {
+        const tr = document.createElement("tr");
+        if (p != null && Math.abs(p - r.triggerPrice) / r.triggerPrice < 0.002) tr.style.outline = "1px solid var(--accent)";
+        tr.innerHTML = `
+          <td>${r.stage}</td>
+          <td>${r.triggerPrice.toFixed(3)}</td>
+          <td class="tag-buy">${r.action}</td>
+          <td>${r.tradeShares}</td>
+          <td>${r.amount.toFixed(2)}</td>
+          <td>${r.totalShares}</td>
+          <td>${r.totalCost.toFixed(2)}</td>
+          <td>${r.avg.toFixed(3)}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }
+
+    function renderLedger() {
+      const cfg = getInputs();
+      const ul = $("ledger");
+      ul.innerHTML = "";
+      if (!state.ledger.length) {
+        ul.innerHTML = "<li>暂无记录</li>";
+      } else {
+        state.ledger.forEach((e, i) => {
+          const li = document.createElement("li");
+          const cls = e.type === "buy" ? "tag-buy" : "tag-sell";
+          li.innerHTML =
+            `<span class="${cls}">${i + 1}. ${e.type === "buy" ? "买" : "卖"} ${e.shares} 股 @ ${e.price.toFixed(3)}（${(e.shares * e.price).toFixed(2)} 元）</span>` +
+            `<button type="button" class="btn btn-ghost ledger-del" data-ledger-i="${i}">删除</button>`;
+          ul.appendChild(li);
+        });
+        ul.querySelectorAll(".ledger-del").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const i = Number(btn.getAttribute("data-ledger-i"));
+            if (!confirm("确定删除第 " + (i + 1) + " 条成交记录？系统将按剩余记录的时间顺序重新汇总持仓、成本、均价与加仓/减仓参考。")) return;
+            state.ledger.splice(i, 1);
+            ensureActiveStockKeyFromForm();
+            saveState(state);
+            refreshPlanAndLedgerFromState();
+            showAlert("已删除，并已按剩余成交顺序重算持仓与各参考价。", "ok");
+          });
+        });
+      }
+
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      $("positionStats").innerHTML = `
+        <div><span>持仓</span><strong>${pos.shares} 股</strong></div>
+        <div><span>成本</span><strong>${pos.costBasis.toFixed(2)}</strong></div>
+        <div><span>均价</span><strong>${pos.shares > 0 ? pos.avgPrice.toFixed(3) : "—"}</strong></div>
+        <div><span>最近买入</span><strong>${pos.lastBuyPrice != null ? pos.lastBuyPrice.toFixed(3) : "—"}</strong></div>
+      `;
+
+      const low = cfg.lowWaterManual != null && cfg.lowWaterManual > 0 ? cfg.lowWaterManual : pos.minBuyPrice;
+      const nb = nextBuyTrigger(pos.lastBuyPrice, cfg.dropPct);
+      const ns = nextSellTrigger(low, cfg.bouncePct);
+      const sellShares = pos.shares > 0 ? defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize) : 0;
+      const sellAmt = ns != null && sellShares > 0 ? sellShares * ns : 0;
+      const nxtLot = nextAddLotShares(pos.shares, cfg.addMult, cfg.lotSize);
+
+      $("nextHints").innerHTML = `
+        <div><span>下一加仓价</span><strong>${nb != null ? nb.toFixed(3) : "—"}</strong></div>
+        <div><span>下一档买入股数（×${cfg.addMult != null ? cfg.addMult : 1} 持仓）</span><strong>${pos.shares > 0 ? nxtLot : "—"}</strong></div>
+        <div><span>该笔约需（触发价）</span><strong>${nb != null && pos.shares > 0 ? (nxtLot * nb).toFixed(2) : "—"}</strong></div>
+        <div><span>持仓低价参考</span><strong>${low != null ? low.toFixed(3) : "—"}</strong></div>
+        <div><span>减仓触发价</span><strong>${ns != null ? ns.toFixed(3) : "—"}</strong></div>
+        <div><span>可卖股数（${cfg.sellHalfPct}%）</span><strong>${sellShares || "—"}</strong></div>
+        <div><span>按触发价回笼</span><strong>${sellAmt ? sellAmt.toFixed(2) : "—"}</strong></div>
+      `;
+
+      renderKeyLevels(cfg, pos);
+      const sig = strategyZone(cfg, pos);
+      $("signalBox").className = "signal state-" + (sig.zone === "near-buy" ? "near-buy" : sig.zone === "near-sell" ? "near-sell" : sig.zone === "hit-buy" ? "hit-buy" : sig.zone === "hit-sell" ? "hit-sell" : sig.zone === "idle" ? "idle" : "watch");
+      $("signalTitle").textContent = sig.title;
+      $("signalDesc").textContent = sig.desc;
+      $("signalBar").style.width = (sig.bar != null ? sig.bar : 50) + "%";
+
+      renderPnL();
+      renderLiveAdviceTable();
+      settleAdvices();
+      renderAdviceWinRate();
+    }
+
+    function initBuy() {
+      const cfg = getInputs();
+      if (cfg.budget <= 0 || cfg.entryPrice <= 0) {
+        showAlert("请填写预算与买入价。", "bad");
+        return;
+      }
+      ensureActiveStockKeyFromForm();
+      if (!state.activeStockCode || String(state.activeStockCode).length !== 6) {
+        showAlert("请先在「标的与现价来源」填写 6 位股票代码（并确认已选中对应自选卡片）。", "bad");
+        return;
+      }
+      const shares = roundLot(cfg.budget / cfg.entryPrice, cfg.lotSize);
+      if (shares <= 0) {
+        showAlert("预算不足以买入一手。", "bad");
+        return;
+      }
+      state.ledger = [{ type: "buy", shares, price: cfg.entryPrice }];
+      saveState(state);
+      refreshPlanAndLedgerFromState();
+      showAlert(`已登记初始建仓：${shares} 股 @ ${cfg.entryPrice.toFixed(3)}`, "ok");
+    }
+
+    function addBuy() {
+      const cfg = getInputs();
+      const price = Number($("addPrice").value);
+      if (!(price > 0)) {
+        showAlert("请填写加仓价。", "bad");
+        return;
+      }
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      const am = cfg.addMult != null && cfg.addMult > 0 ? cfg.addMult : 1;
+      let shares =
+        $("addShares").value === ""
+          ? nextAddLotShares(pos.shares, am, cfg.lotSize)
+          : Number($("addShares").value);
+      shares = roundLot(shares, cfg.lotSize);
+      if (shares <= 0) {
+        showAlert("加仓股数无效。", "bad");
+        return;
+      }
+      ensureActiveStockKeyFromForm();
+      if (!state.activeStockCode || String(state.activeStockCode).length !== 6) {
+        showAlert("请先在「标的与现价来源」填写 6 位股票代码。", "bad");
+        return;
+      }
+      state.ledger.push({ type: "buy", shares, price });
+      saveState(state);
+      $("addPrice").value = "";
+      $("addShares").value = "";
+      refreshPlanAndLedgerFromState();
+      showAlert(`已记录加仓：${shares} 股 @ ${price.toFixed(3)}`, "ok");
+    }
+
+    function doSell() {
+      const cfg = getInputs();
+      const price = Number($("sellPrice").value);
+      if (!(price > 0)) {
+        showAlert("请填写卖出价。", "bad");
+        return;
+      }
+      const pos = aggregatePosition(state.ledger, cfg.lotSize);
+      let shares = $("sellShares").value === "" ? defaultSellShares(pos.shares, cfg.sellHalfPct, cfg.lotSize) : Number($("sellShares").value);
+      shares = roundLot(shares, cfg.lotSize);
+      if (shares <= 0 || shares > pos.shares) {
+        showAlert("卖出股数无效。", "bad");
+        return;
+      }
+      ensureActiveStockKeyFromForm();
+      if (!state.activeStockCode || String(state.activeStockCode).length !== 6) {
+        showAlert("请先在「标的与现价来源」填写 6 位股票代码。", "bad");
+        return;
+      }
+      state.ledger.push({ type: "sell", shares, price });
+      saveState(state);
+      $("sellPrice").value = "";
+      $("sellShares").value = "";
+      refreshPlanAndLedgerFromState();
+      showAlert(`已记录卖出：${shares} 股 @ ${price.toFixed(3)}`, "ok");
+    }
+
+    function undo() {
+      if (!state.ledger.length) return;
+      state.ledger.pop();
+      ensureActiveStockKeyFromForm();
+      saveState(state);
+      refreshPlanAndLedgerFromState();
+    }
+
+    function clearAll() {
+      if (!confirm("清空所有成交记录？")) return;
+      state.ledger = [];
+      ensureActiveStockKeyFromForm();
+      saveState(state);
+      refreshPlanAndLedgerFromState();
+    }
+
+    function scheduleRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = null;
+      if (!$("autoRefresh").checked) return;
+      const sec = normalizeRefreshSec($("refreshSec").value);
+      refreshTimer = setInterval(() => {
+        fetchQuote();
+        scheduleWatchQuotesRefresh();
+      }, sec * 1000);
+    }
+
+    $("btnRefreshQuote").addEventListener("click", () => {
+      persistSettingsFromForm();
+      fetchQuote();
+      scheduleWatchQuotesRefresh();
+    });
+    function refreshPlanAndLedgerFromState() {
+      renderPlan();
+      renderLedger();
+      renderWatchlistCards();
+    }
+
+    function recalcPlanAndUI() {
+      persistSettingsFromForm();
+      refreshPlanAndLedgerFromState();
+      hideAlert();
+    }
+    $("btnRecalc").addEventListener("click", recalcPlanAndUI);
+    if ($("btnRecalcPlan")) $("btnRecalcPlan").addEventListener("click", recalcPlanAndUI);
+    $("btnNotify").addEventListener("click", () => {
+      if (!("Notification" in window)) return;
+      Notification.requestPermission();
+    });
+    $("btnInitBuy").addEventListener("click", initBuy);
+    $("btnAdd").addEventListener("click", addBuy);
+    $("btnUndo").addEventListener("click", undo);
+    $("btnClear").addEventListener("click", clearAll);
+
+    $("btnSell").addEventListener("click", doSell);
+
+    [
+      "budget",
+      "entryPrice",
+      "lotSize",
+      "dropPct",
+      "bouncePct",
+      "sellHalfPct",
+      "addMult",
+      "targetProfitPct",
+      "lowWater",
+      "currentPrice",
+      "useManualPrice",
+    ].forEach((id) => {
+      if (!$(id)) return;
+      $(id).addEventListener("change", () => {
+        persistSettingsFromForm();
+        renderPlan();
+        renderLedger();
+      });
+    });
+    $("stockCode").addEventListener("change", () => {
+      onMainStockIdentityCommitted();
+    });
+    $("stockName").addEventListener("change", () => {
+      persistSettingsFromForm();
+      syncActiveSlotFromForm();
+      saveState(state);
+      $("heroName").textContent = $("stockName").value.trim() || "—";
+      renderWatchlistCards();
+    });
+    $("autoRefresh").addEventListener("change", () => {
+      persistSettingsFromForm();
+      scheduleRefresh();
+    });
+    $("refreshSec").addEventListener("change", () => {
+      persistSettingsFromForm();
+      scheduleRefresh();
+    });
+
+    document.querySelectorAll("#klineTabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        klinePeriod = btn.getAttribute("data-period") || "day";
+        syncKlineTabUi();
+        refreshKlineCharts();
+      });
+    });
+    if ($("btnFetchNews")) $("btnFetchNews").addEventListener("click", () => fetchEastmoneyAnn());
+    if ($("btnWatchAdd")) $("btnWatchAdd").addEventListener("click", watchAddCurrentToEmptySlot);
+    if ($("btnWatchDelete")) $("btnWatchDelete").addEventListener("click", watchDeleteCurrentSlot);
+    if ($("btnAddNewsManual"))
+      $("btnAddNewsManual").addEventListener("click", () => {
+        const title = prompt("新闻标题（可写 [EN] 前缀表示外文，正文请自贴译文）");
+        if (!title || !title.trim()) return;
+        const content = prompt("新闻正文（可选）") || "";
+        const imp = classifyNewsImpact(title, content);
+        const m = impactToSentimentAdvice(imp.impact);
+        const code6 = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+        state.newsItems.unshift({
+          id: "manual_" + Date.now(),
+          title: title.trim(),
+          content: content.trim() || title.trim(),
+          url: "",
+          date: new Date().toLocaleString("zh-CN"),
+          category: "manual",
+          sourceLabel: "手动添加",
+          stockImpact: imp.impact,
+          highRisk: imp.highRisk,
+          matchReason: imp.matchReason,
+          stockCode: code6.length === 6 ? code6 : "",
+          pubTs: Date.now(),
+          sentiment: m.sent,
+          advice: m.side,
+          adviceDetail: imp.matchReason,
+        });
+        saveState(state);
+        renderNewsList();
+        showAlert("已添加。", "ok");
+      });
+    if ($("btnFetchWebNews")) $("btnFetchWebNews").addEventListener("click", () => fetchWebNewsAggregation({ silent: false }));
+    if ($("btnExportNewsMd")) $("btnExportNewsMd").addEventListener("click", exportNewsMarkdownTable);
+    document.querySelectorAll("#newsCatTabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cat = btn.getAttribute("data-news-cat") || "all";
+        state.settings.newsListFilter = cat;
+        state.settings.newsListPage = 1;
+        document.querySelectorAll("#newsCatTabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        persistSettingsFromForm();
+        renderNewsList();
+      });
+    });
+    ["newsSector", "newsKeywords", "newsWindowDays", "newsRss2JsonKey"].forEach((id) => {
+      if (!$(id)) return;
+      $(id).addEventListener("change", () => {
+        persistSettingsFromForm();
+        if (id === "newsSector") renderInferredWebTagsBar();
+      });
+    });
+    if ($("btnRecordTech"))
+      $("btnRecordTech").addEventListener("click", () => {
+        const side = inferTechSideFromText(lastTechAdviceText);
+        const r = recordAdvice(
+          "技术面·MACD/K线",
+          (lastTechAdviceText || "").slice(0, 120),
+          side,
+          "基于当前周期 K 与 MACD 规则摘要，非投资建议。"
+        );
+        if (r) showAlert("已记入建议统计（期满按页面规则判定胜负）。", "ok");
+        else showAlert("当前为中性结论或缺少有效现价，未记入。", "bad");
+      });
+
+    if ($("btnAddBp"))
+      $("btnAddBp").addEventListener("click", () => {
+        const p = Number($("bpPrice").value);
+        if (!(p > 0)) {
+          showAlert("请填写有效买点价格。", "bad");
+          return;
+        }
+        state.buyPoints.push({
+          price: p,
+          note: ($("bpNote").value || "").trim(),
+          ts: Date.now(),
+        });
+        saveState(state);
+        $("bpPrice").value = "";
+        $("bpNote").value = "";
+        renderBuyPoints();
+        renderLiveAdviceTable();
+      });
+
+    ["evalDays", "winThresholdPct"].forEach((id) => {
+      if (!$(id)) return;
+      $(id).addEventListener("change", () => {
+        persistSettingsFromForm();
+        renderAdviceWinRate();
+      });
+    });
+
+    window.addEventListener("resize", () => {
+      if (typeof LightweightCharts === "undefined") return;
+      const el1 = $("chartMain");
+      const el2 = $("chartMacd");
+      if (chartPrice && el1) chartPrice.applyOptions({ width: el1.clientWidth });
+      if (chartMacd && el2) chartMacd.applyOptions({ width: el2.clientWidth });
+    });
+
+    applySettingsToForm();
+    const initCode = ($("stockCode").value || "").replace(/\D/g, "").slice(0, 6);
+    if (initCode.length === 6) state.activeStockCode = initCode;
+    $("heroName").textContent = $("stockName").value.trim() || "金正大";
+    syncActiveSlotFromForm();
+    saveState(state);
+    renderWatchlistCards();
+    renderPlan();
+    renderLedger();
+    renderBuyPoints();
+    renderNewsList();
+    renderAdviceWinRate();
+    fetchQuote();
+    scheduleWatchQuotesRefresh();
+    if (initCode.length === 6) scheduleAutoFetchAnnouncements(true);
+    scheduleRefresh();
+  </script>
+</body>
+</html>
