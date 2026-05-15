@@ -3522,28 +3522,53 @@
 
     function applyImportedWatchTargets(targets) {
       if (!targets.length) return;
-      if (!confirm("导入会替换左侧自选标的列表，但不会删除已保存的成交/新闻快照。继续？")) return;
+      if (!confirm("导入会增量添加/更新自选标的与文件中的持仓记录，不会删除现有自选卡片。继续？")) return;
       flushCurrentSnapshot();
-      const next = defaultWatchlist().map(() => ({ code: "", name: "" }));
-      targets.slice(0, WATCH_SLOT_COUNT).forEach((target, i) => {
-        next[i] = { code: target.code, name: target.name };
+      const next = (state.watchlist || []).slice(0, WATCH_SLOT_COUNT).map((slot) => ({
+        code: getWatchSlotCode(slot),
+        name: String((slot && slot.name) || "").trim(),
+      }));
+      while (next.length < WATCH_SLOT_COUNT) next.push({ code: "", name: "" });
+      const existingByCode = new Map();
+      next.forEach((slot, index) => {
+        const code = getWatchSlotCode(slot);
+        if (code.length === 6 && !existingByCode.has(code)) existingByCode.set(code, index);
+      });
+      let added = 0;
+      let updated = 0;
+      let skipped = 0;
+      let ledgerUpdated = 0;
+      let firstTouched = -1;
+      targets.forEach((target) => {
+        const code = getWatchSlotCode(target);
+        if (code.length !== 6) return;
+        let index = existingByCode.get(code);
+        if (index == null) {
+          index = next.findIndex((slot) => getWatchSlotCode(slot).length !== 6);
+          if (index < 0) {
+            skipped += 1;
+            return;
+          }
+          next[index] = { code, name: target.name || "" };
+          existingByCode.set(code, index);
+          added += 1;
+        } else {
+          next[index] = { ...next[index], code, name: target.name || next[index].name || "" };
+          updated += 1;
+        }
+        if (firstTouched < 0) firstTouched = index;
         if (target.ledger && target.ledger.length) {
-          if (!state.stockSnapshots) state.stockSnapshots = {};
-          const prev = state.stockSnapshots[target.code] || {};
-          state.stockSnapshots[target.code] = {
-            ...prev,
-            stockName: target.name || prev.stockName || target.code,
-            ledger: normalizeWatchLedgerEntries(target.ledger),
-          };
+          saveImportedWatchLedger(code, target.name, target.ledger);
+          ledgerUpdated += 1;
         }
       });
       const currentCode = String((state.watchlist[state.activeWatchIndex] || {}).code || "").replace(/\D/g, "").slice(0, 6);
       state.watchlist = next;
-      const importedActiveIndex =
+      const currentActiveIndex =
         currentCode.length === 6
           ? next.findIndex((slot) => String(slot.code || "").replace(/\D/g, "").slice(0, 6) === currentCode)
           : -1;
-      state.activeWatchIndex = importedActiveIndex >= 0 ? importedActiveIndex : 0;
+      state.activeWatchIndex = currentActiveIndex >= 0 ? currentActiveIndex : firstTouched >= 0 ? firstTouched : state.activeWatchIndex;
       if (state.settings) {
         state.settings.watchSortMode = "";
         state.settings.watchSortDir = "desc";
@@ -3556,7 +3581,29 @@
       scheduleWatchQuotesRefresh();
       renderNewsList();
       renderInferredWebTagsBar();
-      showAlert("已导入 " + targets.length + " 个标的。", "ok");
+      showAlert(
+        "已增量导入：新增 " +
+          added +
+          " 个，更新 " +
+          updated +
+          " 个" +
+          (ledgerUpdated ? "，持仓 " + ledgerUpdated + " 个" : "") +
+          (skipped ? "，跳过 " + skipped + " 个（无空位）" : "") +
+          "。",
+        "ok"
+      );
+    }
+
+    function saveImportedWatchLedger(code, name, ledger) {
+      const normalized = normalizeWatchLedgerEntries(ledger);
+      if (!normalized.length) return;
+      if (!state.stockSnapshots) state.stockSnapshots = {};
+      const prev = state.stockSnapshots[code] || {};
+      state.stockSnapshots[code] = {
+        ...prev,
+        stockName: name || prev.stockName || code,
+        ledger: normalized,
+      };
     }
 
     function activateImportedWatchSlot(index) {
