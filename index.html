@@ -102,6 +102,65 @@
       touch-action: pan-y;
       -webkit-overflow-scrolling: touch;
     }
+    .watch-summary {
+      flex-shrink: 0;
+      margin: 0 0 0.55rem;
+      padding: 0.55rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(14, 19, 28, 0.76);
+    }
+    .watch-summary-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.4rem;
+    }
+    .watch-summary-label {
+      font-size: 0.62rem;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .watch-summary-value {
+      font-size: 0.94rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .watch-summary-value.tong-profit { color: #ff4d55; }
+    .watch-summary-value.tong-loss { color: #3d8cff; }
+    .watch-summary-value.tong-flat { color: var(--muted); }
+    .watch-summary-sub {
+      font-size: 0.58rem;
+      color: var(--muted);
+      margin-bottom: 0.45rem;
+    }
+    .watch-sort-controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.25rem;
+    }
+    .watch-sort-btn {
+      min-width: 0;
+      min-height: 1.55rem;
+      padding: 0.28rem 0.25rem;
+      border-radius: 7px;
+      border: 1px solid rgba(94, 176, 255, 0.22);
+      background: rgba(94, 176, 255, 0.05);
+      color: var(--muted);
+      font-size: 0.58rem;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .watch-sort-btn:hover,
+    .watch-sort-btn.active {
+      border-color: rgba(94, 176, 255, 0.55);
+      background: rgba(94, 176, 255, 0.14);
+      color: var(--text);
+    }
     .watch-card {
       position: relative;
       display: flex;
@@ -840,6 +899,18 @@
           </p>
         </div>
       </div>
+      <div class="watch-summary" aria-label="自选持仓当日盈亏汇总与排序">
+        <div class="watch-summary-row">
+          <span class="watch-summary-label">当日持仓盈亏合计</span>
+          <strong class="watch-summary-value tong-flat" id="watchDailyTotal">—</strong>
+        </div>
+        <div class="watch-summary-sub" id="watchDailyCount">仅统计有持仓且已返回行情的卡片</div>
+        <div class="watch-sort-controls" aria-label="自选卡片排序">
+          <button type="button" class="watch-sort-btn" data-watch-sort="dailyPnl">当日盈亏</button>
+          <button type="button" class="watch-sort-btn" data-watch-sort="totalPnl">持仓盈亏</button>
+          <button type="button" class="watch-sort-btn" data-watch-sort="dailyPct">当日涨幅</button>
+        </div>
+      </div>
       <div id="watchCardList" class="watch-card-list"></div>
       <div class="watch-sidebar-actions">
         <button type="button" class="btn btn-secondary" id="btnWatchAdd">添加至空位</button>
@@ -1401,6 +1472,8 @@
       lastWebNewsTags: [],
       newsPageSize: 20,
       newsListPage: 1,
+      watchSortMode: "",
+      watchSortDir: "desc",
     });
 
     function loadState() {
@@ -3348,6 +3421,9 @@
       if (!list) return;
       list.innerHTML = "";
       const activeIdx = Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0));
+      let dailyTotal = 0;
+      let dailyCount = 0;
+      let heldCount = 0;
       for (let i = 0; i < WATCH_SLOT_COUNT; i++) {
         const slot = state.watchlist[i] || { code: "", name: "" };
         const code6 = String(slot.code || "").replace(/\D/g, "").slice(0, 6);
@@ -3380,6 +3456,11 @@
         card.className = "watch-card" + (i === activeIdx ? " watch-card--active" : "");
         card.dataset.index = String(i);
         const m = computeWatchCardMetrics(code6, cq);
+        if (m.hasPosition) heldCount += 1;
+        if (m.dAmt != null && isFinite(m.dAmt)) {
+          dailyTotal += m.dAmt;
+          dailyCount += 1;
+        }
         const pctChgCls = pctCls === "up" ? "a-up" : pctCls === "down" ? "a-down" : "a-flat";
         const priceCell =
           code6.length === 6
@@ -3418,6 +3499,8 @@
           '"></div>';
         list.appendChild(card);
       }
+      renderWatchSummary(dailyTotal, dailyCount, heldCount);
+      syncWatchSortButtons();
 
       list.querySelectorAll(".watch-card-grip").forEach((grip) => {
         grip.addEventListener("pointerdown", onWatchGripDown);
@@ -3430,6 +3513,36 @@
             main.click();
           }
         });
+      });
+    }
+
+    function renderWatchSummary(dailyTotal, dailyCount, heldCount) {
+      const totalEl = $("watchDailyTotal");
+      const countEl = $("watchDailyCount");
+      if (totalEl) {
+        totalEl.textContent = dailyCount > 0 ? formatWatchThsAmount(dailyTotal) : "—";
+        totalEl.className = "watch-summary-value " + (dailyCount > 0 ? tongPnlClassFromAmount(dailyTotal) : "tong-flat");
+      }
+      if (countEl) {
+        if (heldCount <= 0) {
+          countEl.textContent = "暂无持仓卡片";
+        } else if (dailyCount < heldCount) {
+          countEl.textContent = "已统计 " + dailyCount + " / " + heldCount + " 张有持仓且有行情的卡片";
+        } else {
+          countEl.textContent = "已统计 " + dailyCount + " 张有持仓卡片";
+        }
+      }
+    }
+
+    function syncWatchSortButtons() {
+      const mode = (state.settings && state.settings.watchSortMode) || "";
+      const dir = normalizeWatchSortDir(state.settings && state.settings.watchSortDir);
+      document.querySelectorAll("[data-watch-sort]").forEach((btn) => {
+        const btnMode = btn.getAttribute("data-watch-sort") || "";
+        const active = btnMode === mode;
+        btn.classList.toggle("active", active);
+        btn.textContent = watchSortModeLabel(btnMode) + (active ? (dir === "asc" ? " ↑" : " ↓") : "");
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
       });
     }
 
@@ -3466,7 +3579,16 @@
     }
 
     function computeWatchCardMetrics(code6, cq) {
-      const r = { dAmtT: "—", tAmtT: "—", dCls: "tong-flat", tCls: "tong-flat" };
+      const r = {
+        dAmt: null,
+        tAmt: null,
+        pct: cq && cq.pct != null && isFinite(cq.pct) ? cq.pct : null,
+        hasPosition: false,
+        dAmtT: "—",
+        tAmtT: "—",
+        dCls: "tong-flat",
+        tCls: "tong-flat",
+      };
       if (code6.length !== 6) return r;
       const snap = state.stockSnapshots && state.stockSnapshots[code6];
       const ledger = snap && Array.isArray(snap.ledger) ? snap.ledger : [];
@@ -3474,6 +3596,7 @@
       const price = cq && cq.price != null && isFinite(cq.price) ? cq.price : null;
       const prevClose = cq && cq.prevClose != null && isFinite(cq.prevClose) ? cq.prevClose : null;
       if (pos.shares <= 0) return r;
+      r.hasPosition = true;
 
       let dAmt = null;
       if (price != null && prevClose != null && prevClose > 0) {
@@ -3484,11 +3607,72 @@
         tAmt = price * pos.shares - pos.costBasis;
       }
 
+      r.dAmt = dAmt;
+      r.tAmt = tAmt;
       r.dAmtT = dAmt != null ? formatWatchThsAmount(dAmt) : "—";
       r.tAmtT = tAmt != null ? formatWatchThsAmount(tAmt) : "—";
       r.dCls = dAmt != null ? tongPnlClassFromAmount(dAmt) : "tong-flat";
       r.tCls = tAmt != null ? tongPnlClassFromAmount(tAmt) : "tong-flat";
       return r;
+    }
+
+    function sortWatchCardsBy(mode) {
+      flushCurrentSnapshot();
+      if (!state.settings) state.settings = defaultSettings();
+      const prevMode = state.settings.watchSortMode || "";
+      const prevDir = normalizeWatchSortDir(state.settings.watchSortDir);
+      const dir = prevMode === mode ? (prevDir === "desc" ? "asc" : "desc") : "desc";
+      if (!applyWatchSortMode(mode, dir)) return;
+      state.settings.watchSortMode = mode;
+      state.settings.watchSortDir = dir;
+      saveState(state);
+      renderWatchlistCards();
+      showAlert("已按" + watchSortModeLabel(mode) + (dir === "asc" ? "从低到高" : "从高到低") + "排序。", "ok");
+    }
+
+    function applyWatchSortMode(mode, dir) {
+      const modes = { dailyPnl: "dAmt", totalPnl: "tAmt", dailyPct: "pct" };
+      const metricKey = modes[mode];
+      if (!metricKey) return false;
+      const sortDir = normalizeWatchSortDir(dir);
+      const activeSlot = state.watchlist[Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0))];
+      const decorated = state.watchlist.map((slot, index) => {
+        const code6 = String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6);
+        const cq = code6.length === 6 ? cardQuotes[code6] : null;
+        const metrics = computeWatchCardMetrics(code6, cq);
+        const metric = metrics[metricKey];
+        return {
+          slot,
+          index,
+          hasCode: code6.length === 6,
+          hasPosition: metrics.hasPosition,
+          hasMetric: metric != null && isFinite(metric),
+          metric: metric != null && isFinite(metric) ? metric : -Infinity,
+        };
+      });
+      decorated.sort((a, b) => {
+        if (a.hasMetric !== b.hasMetric) return a.hasMetric ? -1 : 1;
+        if (a.hasMetric && b.hasMetric && b.metric !== a.metric) {
+          return sortDir === "asc" ? a.metric - b.metric : b.metric - a.metric;
+        }
+        if (a.hasPosition !== b.hasPosition) return a.hasPosition ? -1 : 1;
+        if (a.hasCode !== b.hasCode) return a.hasCode ? -1 : 1;
+        return a.index - b.index;
+      });
+      state.watchlist = decorated.map((item) => item.slot);
+      state.activeWatchIndex = Math.max(0, state.watchlist.indexOf(activeSlot));
+      return true;
+    }
+
+    function normalizeWatchSortDir(dir) {
+      return dir === "asc" ? "asc" : "desc";
+    }
+
+    function watchSortModeLabel(mode) {
+      if (mode === "dailyPnl") return "当日盈亏";
+      if (mode === "totalPnl") return "持仓盈亏";
+      if (mode === "dailyPct") return "当日涨幅";
+      return "当前指标";
     }
 
     function onWatchCardClick(e) {
@@ -3612,6 +3796,10 @@
         const item = state.watchlist.splice(index, 1)[0];
         state.watchlist.splice(to, 0, item);
         state.activeWatchIndex = remapWatchActiveIndex(state.activeWatchIndex, index, to);
+        if (state.settings) {
+          state.settings.watchSortMode = "";
+          state.settings.watchSortDir = "desc";
+        }
         saveState(state);
         renderWatchlistCards();
         const moved = listEl.children[to];
@@ -3705,6 +3893,9 @@
       let i = 0;
       function next() {
         if (i >= codes.length) {
+          const mode = state.settings && state.settings.watchSortMode;
+          const dir = normalizeWatchSortDir(state.settings && state.settings.watchSortDir);
+          if (mode && applyWatchSortMode(mode, dir)) saveState(state);
           renderWatchlistCards();
           return;
         }
@@ -4405,6 +4596,9 @@
     if ($("btnFetchNews")) $("btnFetchNews").addEventListener("click", () => fetchEastmoneyAnn());
     if ($("btnWatchAdd")) $("btnWatchAdd").addEventListener("click", watchAddCurrentToEmptySlot);
     if ($("btnWatchDelete")) $("btnWatchDelete").addEventListener("click", watchDeleteCurrentSlot);
+    document.querySelectorAll("[data-watch-sort]").forEach((btn) => {
+      btn.addEventListener("click", () => sortWatchCardsBy(btn.getAttribute("data-watch-sort") || ""));
+    });
     if ($("btnAddNewsManual"))
       $("btnAddNewsManual").addEventListener("click", () => {
         const title = prompt("新闻标题（可写 [EN] 前缀表示外文，正文请自贴译文）");
