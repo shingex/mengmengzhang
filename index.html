@@ -894,7 +894,7 @@
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
             <strong class="il-h">作用</strong>同时关注最多 50 只股票，每格独立保存持仓、成交、新闻等快照，互不混用；左侧列表可上下滑动浏览。<br />
-            <strong class="il-h">用法</strong>点某格卡片即切换到该标的；在右侧「标的与现价来源」填 6 位代码与公司名。左侧把手拖动可调整卡片顺序。「添加至空位」把当前填写代码放入第一个空位；「删除当前格」清空当前格并切到该空位。<br />
+            <strong class="il-h">用法</strong>点某格卡片即切换到该标的；在右侧「标的与现价来源」填 6 位代码与公司名。左侧把手拖动可调整卡片顺序。「添加至空位」把当前填写代码放入第一个空位；可导入/导出标的列表；「删除当前格」清空当前格并切到该空位。<br />
             <strong class="il-h">可实现</strong>多标的轮看、排序整理、与主区行情/K 线/新闻联动（始终对应当前选中的那一格）。
           </p>
         </div>
@@ -914,7 +914,10 @@
       <div id="watchCardList" class="watch-card-list"></div>
       <div class="watch-sidebar-actions">
         <button type="button" class="btn btn-secondary" id="btnWatchAdd">添加至空位</button>
+        <button type="button" class="btn btn-ghost" id="btnWatchExport">导出标的</button>
+        <button type="button" class="btn btn-ghost" id="btnWatchImport">导入标的</button>
         <button type="button" class="btn btn-ghost" id="btnWatchDelete">删除当前格</button>
+        <input type="file" id="watchImportFile" accept=".json,.csv,.txt,application/json,text/plain,text/csv" hidden />
       </div>
     </aside>
     <div class="wrap">
@@ -3242,6 +3245,156 @@
       showAlert("已清空第 " + (i + 1) + " 格。", "ok");
     }
 
+    function exportWatchTargets() {
+      flushCurrentSnapshot();
+      const targets = (state.watchlist || [])
+        .map((slot, index) => ({
+          slot: index + 1,
+          code: String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6),
+          name: String((slot && slot.name) || (cardQuotes[String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6)] || {}).name || "").trim(),
+        }))
+        .filter((item) => item.code.length === 6 || item.name);
+      if (!targets.length) {
+        showAlert("暂无可导出的标的。", "bad");
+        return;
+      }
+      const payload = {
+        type: "mengmengzhang-watch-targets",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        targets,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "watch-targets-" + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "") + ".json";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        a.remove();
+      }, 0);
+      showAlert("已导出 " + targets.length + " 个标的。", "ok");
+    }
+
+    function openWatchImportPicker() {
+      const input = $("watchImportFile");
+      if (!input) return;
+      input.value = "";
+      input.click();
+    }
+
+    function importWatchTargetsFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const targets = parseWatchTargetsImport(String(reader.result || ""));
+          applyImportedWatchTargets(targets);
+        } catch (err) {
+          showAlert(err && err.message ? err.message : "导入失败：文件格式无法识别。", "bad");
+        }
+      };
+      reader.onerror = () => showAlert("导入失败：无法读取文件。", "bad");
+      reader.readAsText(file, "utf-8");
+    }
+
+    function parseWatchTargetsImport(text) {
+      const raw = String(text || "").trim();
+      if (!raw) throw new Error("导入失败：文件为空。");
+      if (raw[0] === "{" || raw[0] === "[") {
+        const json = JSON.parse(raw);
+        const arr = Array.isArray(json)
+          ? json
+          : Array.isArray(json.targets)
+          ? json.targets
+          : Array.isArray(json.watchlist)
+          ? json.watchlist
+          : null;
+        if (!arr) throw new Error("JSON 中未找到 targets 或 watchlist 数组。");
+        return normalizeImportedWatchTargets(arr);
+      }
+      const rows = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"))
+        .map((line) => {
+          const parts = line.split(/[,，\t]/).map((part) => part.trim());
+          const code = (parts[0] || "").replace(/\D/g, "").slice(0, 6);
+          const name = parts.slice(1).join(" ").trim();
+          return { code, name };
+        });
+      return normalizeImportedWatchTargets(rows);
+    }
+
+    function normalizeImportedWatchTargets(arr) {
+      const out = [];
+      const seen = new Set();
+      for (const item of arr) {
+        const source = typeof item === "string" ? { code: item, name: "" } : item || {};
+        const code = String(source.code || source.代码 || source.symbol || "").replace(/\D/g, "").slice(0, 6);
+        const name = String(source.name || source.名称 || source.title || "").trim();
+        if (code.length !== 6) continue;
+        if (seen.has(code)) continue;
+        seen.add(code);
+        out.push({ code, name });
+        if (out.length >= WATCH_SLOT_COUNT) break;
+      }
+      if (!out.length) throw new Error("导入失败：没有识别到有效的 6 位股票代码。");
+      return out;
+    }
+
+    function applyImportedWatchTargets(targets) {
+      if (!targets.length) return;
+      if (!confirm("导入会替换左侧自选标的列表，但不会删除已保存的成交/新闻快照。继续？")) return;
+      flushCurrentSnapshot();
+      const next = defaultWatchlist().map(() => ({ code: "", name: "" }));
+      targets.slice(0, WATCH_SLOT_COUNT).forEach((target, i) => {
+        next[i] = { code: target.code, name: target.name };
+      });
+      const currentCode = String((state.watchlist[state.activeWatchIndex] || {}).code || "").replace(/\D/g, "").slice(0, 6);
+      state.watchlist = next;
+      const importedActiveIndex =
+        currentCode.length === 6
+          ? next.findIndex((slot) => String(slot.code || "").replace(/\D/g, "").slice(0, 6) === currentCode)
+          : -1;
+      state.activeWatchIndex = importedActiveIndex >= 0 ? importedActiveIndex : 0;
+      if (state.settings) {
+        state.settings.watchSortMode = "";
+        state.settings.watchSortDir = "desc";
+      }
+      activateImportedWatchSlot(state.activeWatchIndex);
+      saveState(state);
+      refreshPlanAndLedgerFromState();
+      fetchQuote();
+      refreshKlineCharts();
+      scheduleWatchQuotesRefresh();
+      renderNewsList();
+      renderInferredWebTagsBar();
+      showAlert("已导入 " + targets.length + " 个标的。", "ok");
+    }
+
+    function activateImportedWatchSlot(index) {
+      const slot = state.watchlist[index] || { code: "", name: "" };
+      const code6 = String(slot.code || "").replace(/\D/g, "").slice(0, 6);
+      if (code6.length === 6) {
+        loadSnapshotForStock(code6, slot.name);
+      } else {
+        state.ledger = [];
+        state.buyPoints = [];
+        state.adviceHistory = [];
+        state.newsItems = [];
+        $("stockCode").value = "";
+        $("stockName").value = "";
+        state.settings.stockCode = "";
+        state.settings.stockName = "";
+        state.activeStockCode = "";
+      }
+      $("heroName").textContent = $("stockName").value.trim() || "—";
+      if (code6.length === 6) scheduleAutoFetchAnnouncements(true);
+      else lastAnnFetchedForCode = null;
+    }
+
     function renderBuyPoints() {
       const box = $("buyPointsList");
       if (!box) return;
@@ -4595,6 +4748,13 @@
     });
     if ($("btnFetchNews")) $("btnFetchNews").addEventListener("click", () => fetchEastmoneyAnn());
     if ($("btnWatchAdd")) $("btnWatchAdd").addEventListener("click", watchAddCurrentToEmptySlot);
+    if ($("btnWatchExport")) $("btnWatchExport").addEventListener("click", exportWatchTargets);
+    if ($("btnWatchImport")) $("btnWatchImport").addEventListener("click", openWatchImportPicker);
+    if ($("watchImportFile"))
+      $("watchImportFile").addEventListener("change", (e) => {
+        const file = e.target && e.target.files && e.target.files[0];
+        importWatchTargetsFile(file);
+      });
     if ($("btnWatchDelete")) $("btnWatchDelete").addEventListener("click", watchDeleteCurrentSlot);
     document.querySelectorAll("[data-watch-sort]").forEach((btn) => {
       btn.addEventListener("click", () => sortWatchCardsBy(btn.getAttribute("data-watch-sort") || ""));
