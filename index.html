@@ -161,6 +161,16 @@
       background: rgba(94, 176, 255, 0.14);
       color: var(--text);
     }
+    .watch-card-add-row {
+      flex-shrink: 0;
+      width: 100%;
+    }
+    .watch-card-add-row .btn {
+      width: 100%;
+      justify-content: center;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.5rem;
+    }
     .watch-card {
       position: relative;
       display: flex;
@@ -176,6 +186,10 @@
     .watch-card.watch-card--active {
       border-color: var(--accent);
       box-shadow: 0 0 0 1px rgba(94, 176, 255, 0.35);
+    }
+    .watch-card.watch-card--menu-open {
+      overflow: visible;
+      z-index: 30;
     }
     .watch-card.watch-card--dragging {
       transition: none !important;
@@ -239,6 +253,64 @@
     .watch-card-main:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: -2px;
+    }
+    .watch-card-menu {
+      position: absolute;
+      top: 0.35rem;
+      left: 0.25rem;
+      z-index: 8;
+    }
+    .watch-card-menu-btn {
+      width: 1.25rem;
+      height: 1.25rem;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      border: 1px solid rgba(94, 176, 255, 0.32);
+      background: rgba(14, 19, 28, 0.5);
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .watch-card-menu-btn:hover,
+    .watch-card-menu-btn[aria-expanded="true"] {
+      color: var(--text);
+      border-color: rgba(94, 176, 255, 0.65);
+      background: rgba(94, 176, 255, 0.14);
+    }
+    .watch-card-menu-pop {
+      display: none;
+      position: absolute;
+      top: calc(100% + 0.25rem);
+      left: 0;
+      min-width: 6rem;
+      padding: 0.25rem;
+      border-radius: 8px;
+      border: 1px solid rgba(94, 176, 255, 0.28);
+      background: rgba(12, 22, 35, 0.98);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+    }
+    .watch-card-menu.open .watch-card-menu-pop {
+      display: block;
+    }
+    .watch-card-menu-item {
+      width: 100%;
+      border: 0;
+      border-radius: 6px;
+      padding: 0.35rem 0.45rem;
+      background: transparent;
+      color: var(--warn);
+      font-size: 0.72rem;
+      font-weight: 650;
+      text-align: left;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .watch-card-menu-item:hover,
+    .watch-card-menu-item:focus-visible {
+      outline: none;
+      background: rgba(255, 92, 92, 0.12);
     }
     .watch-card-grid {
       display: grid;
@@ -359,17 +431,20 @@
     .watch-sidebar-actions {
       flex-shrink: 0;
       display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
+      justify-content: flex-end;
+      gap: 0.35rem;
       margin-top: 0.55rem;
       padding-top: 0.55rem;
       border-top: 1px solid var(--border);
     }
     .watch-sidebar-actions .btn {
-      width: 100%;
+      width: 2rem;
+      min-width: 2rem;
+      height: 2rem;
       justify-content: center;
-      font-size: 0.8rem;
-      padding: 0.4rem 0.5rem;
+      font-size: 1rem;
+      padding: 0;
+      line-height: 1;
     }
     .wrap {
       position: relative;
@@ -880,6 +955,9 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         max-height: none;
       }
+      .watch-card-add-row {
+        grid-column: 1 / -1;
+      }
     }
   </style>
 </head>
@@ -894,7 +972,7 @@
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
             <strong class="il-h">作用</strong>同时关注最多 50 只股票，每格独立保存持仓、成交、新闻等快照，互不混用；左侧列表可上下滑动浏览。<br />
-            <strong class="il-h">用法</strong>点某格卡片即切换到该标的；在右侧「标的与现价来源」填 6 位代码与公司名。左侧把手拖动可调整卡片顺序。「添加至空位」把当前填写代码放入第一个空位；可导入/导出标的列表；「删除当前格」清空当前格并切到该空位。<br />
+            <strong class="il-h">用法</strong>点某格卡片即切换到该标的；在右侧「标的与现价来源」填 6 位代码与公司名。左侧把手拖动可调整卡片顺序。「添加至空位」把当前填写代码放入第一个空位；可导入/导出标的列表；卡片右上角三点菜单可删除该卡片。<br />
             <strong class="il-h">可实现</strong>多标的轮看、排序整理、与主区行情/K 线/新闻联动（始终对应当前选中的那一格）。
           </p>
         </div>
@@ -913,10 +991,8 @@
       </div>
       <div id="watchCardList" class="watch-card-list"></div>
       <div class="watch-sidebar-actions">
-        <button type="button" class="btn btn-secondary" id="btnWatchAdd">添加至空位</button>
-        <button type="button" class="btn btn-ghost" id="btnWatchExport">导出标的</button>
-        <button type="button" class="btn btn-ghost" id="btnWatchImport">导入标的</button>
-        <button type="button" class="btn btn-ghost" id="btnWatchDelete">删除当前格</button>
+        <button type="button" class="btn btn-ghost" id="btnWatchExport" aria-label="导出标的" title="导出标的">⇩</button>
+        <button type="button" class="btn btn-ghost" id="btnWatchImport" aria-label="导入标的" title="导入标的">⇧</button>
         <input type="file" id="watchImportFile" accept=".json,.csv,.txt,application/json,text/plain,text/csv" hidden />
       </div>
     </aside>
@@ -3225,7 +3301,7 @@
         return c.length !== 6;
       });
       if (emptyIdx < 0) {
-        showAlert(WATCH_SLOT_COUNT + " 个自选位已满。可先「删除当前格」或拖动整理后再添加。", "bad");
+        showAlert(WATCH_SLOT_COUNT + " 个自选位已满。可先从卡片三点菜单删除一张，或拖动整理后再添加。", "bad");
         return;
       }
       flushCurrentSnapshot();
@@ -3235,14 +3311,19 @@
       showAlert("已放入第 " + (emptyIdx + 1) + " 格。", "ok");
     }
 
-    function watchDeleteCurrentSlot() {
-      if (!confirm("确定清空当前自选格？（会切换到该空位并清空页面上的代码与本地快照）")) return;
+    function watchDeleteSlot(index) {
+      if (index < 0 || index >= WATCH_SLOT_COUNT) return;
+      if (!confirm("确定清空这张自选卡片？（会保留该股票已保存的成交/新闻快照）")) return;
       flushCurrentSnapshot();
-      const i = Math.min(WATCH_SLOT_COUNT - 1, Math.max(0, state.activeWatchIndex || 0));
-      state.watchlist[i] = { code: "", name: "" };
+      state.watchlist[index] = { code: "", name: "" };
       saveState(state);
-      selectWatchSlot(i);
-      showAlert("已清空第 " + (i + 1) + " 格。", "ok");
+      if (index === state.activeWatchIndex) {
+        selectWatchSlot(index);
+      } else {
+        renderWatchlistCards();
+        scheduleWatchQuotesRefresh();
+      }
+      showAlert("已清空第 " + (index + 1) + " 格。", "ok");
     }
 
     function exportWatchTargets() {
@@ -3565,6 +3646,14 @@
       return active;
     }
 
+    function getWatchSlotCode(slot) {
+      return String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6);
+    }
+
+    function makeEmptyWatchSlots(count) {
+      return Array.from({ length: Math.max(0, count) }, () => ({ code: "", name: "" }));
+    }
+
     let watchDrag = null;
     let watchSuppressClick = false;
     let watchQuoteTimer = null;
@@ -3579,7 +3668,8 @@
       let heldCount = 0;
       for (let i = 0; i < WATCH_SLOT_COUNT; i++) {
         const slot = state.watchlist[i] || { code: "", name: "" };
-        const code6 = String(slot.code || "").replace(/\D/g, "").slice(0, 6);
+        const code6 = getWatchSlotCode(slot);
+        if (code6.length !== 6) continue;
         const cq = code6.length === 6 ? cardQuotes[code6] : null;
         let stripCls = "flat";
         let pctCls = "flat";
@@ -3620,6 +3710,9 @@
             ? '<span class="wc-price-big">' + escapeHtml(priceText) + '</span><span class="wc-price-unit">元</span>'
             : '<span class="wc-price-big">' + escapeHtml(priceText) + "</span>";
         card.innerHTML =
+          '<div class="watch-card-menu"><button type="button" class="watch-card-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="卡片菜单" title="卡片菜单">⋯</button><div class="watch-card-menu-pop" role="menu"><button type="button" class="watch-card-menu-item" role="menuitem" data-watch-delete="' +
+          i +
+          '">删除卡片</button></div></div>' +
           '<div class="watch-card-inner"><div class="watch-card-grip" title="拖动排序">⋮⋮</div><div class="watch-card-main" tabindex="0" role="button">' +
           '<div class="watch-card-grid">' +
           '<div class="wc-l1"><div class="watch-card-title">' +
@@ -3652,9 +3745,18 @@
           '"></div>';
         list.appendChild(card);
       }
+      appendWatchAddButton(list);
       renderWatchSummary(dailyTotal, dailyCount, heldCount);
       syncWatchSortButtons();
 
+      const addBtn = $("btnWatchAdd");
+      if (addBtn) addBtn.addEventListener("click", watchAddCurrentToEmptySlot);
+      list.querySelectorAll(".watch-card-menu-btn").forEach((btn) => {
+        btn.addEventListener("click", onWatchCardMenuToggle);
+      });
+      list.querySelectorAll("[data-watch-delete]").forEach((btn) => {
+        btn.addEventListener("click", onWatchCardMenuDelete);
+      });
       list.querySelectorAll(".watch-card-grip").forEach((grip) => {
         grip.addEventListener("pointerdown", onWatchGripDown);
       });
@@ -3667,6 +3769,46 @@
           }
         });
       });
+    }
+
+    function appendWatchAddButton(list) {
+      const row = document.createElement("div");
+      row.className = "watch-card-add-row";
+      row.innerHTML = '<button type="button" class="btn btn-secondary" id="btnWatchAdd">添加至空位</button>';
+      list.appendChild(row);
+    }
+
+    function closeWatchCardMenus() {
+      document.querySelectorAll(".watch-card-menu.open").forEach((menu) => {
+        menu.classList.remove("open");
+        const btn = menu.querySelector(".watch-card-menu-btn");
+        if (btn) btn.setAttribute("aria-expanded", "false");
+        const card = menu.closest(".watch-card");
+        if (card) card.classList.remove("watch-card--menu-open");
+      });
+    }
+
+    function onWatchCardMenuToggle(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const menu = e.currentTarget.closest(".watch-card-menu");
+      if (!menu) return;
+      const open = menu.classList.contains("open");
+      closeWatchCardMenus();
+      if (!open) {
+        menu.classList.add("open");
+        e.currentTarget.setAttribute("aria-expanded", "true");
+        const card = menu.closest(".watch-card");
+        if (card) card.classList.add("watch-card--menu-open");
+      }
+    }
+
+    function onWatchCardMenuDelete(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const index = Number(e.currentTarget.getAttribute("data-watch-delete"));
+      closeWatchCardMenus();
+      watchDeleteSlot(index);
     }
 
     function renderWatchSummary(dailyTotal, dailyCount, heldCount) {
@@ -3879,17 +4021,22 @@
       const card = grip.closest(".watch-card");
       const list = $("watchCardList");
       if (!card || !list) return;
-      const index = Number(card.dataset.index);
+      const cards = Array.from(list.querySelectorAll(".watch-card"));
+      const index = cards.indexOf(card);
+      const dataIndex = Number(card.dataset.index);
+      if (index < 0 || !Number.isFinite(dataIndex)) return;
       const rect = card.getBoundingClientRect();
       const gap = 10;
       const itemH = rect.height + gap;
       watchDrag = {
         index,
+        dataIndex,
         itemH,
         listEl: list,
         startY: e.clientY,
         grabY: e.clientY - rect.top,
         lastTarget: index,
+        maxTarget: Math.max(0, cards.length - 1),
         pointerId: e.pointerId,
       };
       card.classList.add("watch-card--dragging");
@@ -3905,15 +4052,16 @@
       if (!watchDrag) return;
       const { index, itemH, listEl, startY } = watchDrag;
       const dy = e.clientY - startY;
-      const dragged = listEl.children[index];
+      const cards = Array.from(listEl.querySelectorAll(".watch-card"));
+      const dragged = cards[index];
       if (dragged) dragged.style.transform = "translateY(" + dy + "px)";
       const listRect = listEl.getBoundingClientRect();
       const rel = e.clientY - listRect.top - watchDrag.grabY;
       let target = Math.round(rel / itemH);
-      target = Math.max(0, Math.min(WATCH_SLOT_COUNT - 1, target));
+      target = Math.max(0, Math.min(watchDrag.maxTarget, target));
       watchDrag.lastTarget = target;
-      for (let i = 0; i < listEl.children.length; i++) {
-        const el = listEl.children[i];
+      for (let i = 0; i < cards.length; i++) {
+        const el = cards[i];
         if (i === index) continue;
         let shift = 0;
         if (index < target) {
@@ -3936,8 +4084,9 @@
       card.removeEventListener("pointermove", onWatchDragMove);
       card.removeEventListener("pointerup", onWatchDragUp);
       card.removeEventListener("pointercancel", onWatchDragUp);
-      for (let i = 0; i < listEl.children.length; i++) {
-        const el = listEl.children[i];
+      const cards = Array.from(listEl.querySelectorAll(".watch-card"));
+      for (let i = 0; i < cards.length; i++) {
+        const el = cards[i];
         el.style.transform = "";
         el.style.transition = "";
         el.classList.remove("watch-card--dragging");
@@ -3946,16 +4095,25 @@
       watchDrag = null;
       if (index !== to) {
         watchSuppressClick = true;
-        const item = state.watchlist.splice(index, 1)[0];
-        state.watchlist.splice(to, 0, item);
-        state.activeWatchIndex = remapWatchActiveIndex(state.activeWatchIndex, index, to);
+        const activeSlot = state.watchlist[state.activeWatchIndex];
+        const filled = state.watchlist
+          .map((slot) => ({ slot, code: getWatchSlotCode(slot) }))
+          .filter((item) => item.code.length === 6);
+        const item = filled.splice(index, 1)[0];
+        if (!item) {
+          renderWatchlistCards();
+          return;
+        }
+        filled.splice(to, 0, item);
+        state.watchlist = filled.map((item) => item.slot).concat(makeEmptyWatchSlots(WATCH_SLOT_COUNT - filled.length));
+        state.activeWatchIndex = Math.max(0, state.watchlist.indexOf(activeSlot));
         if (state.settings) {
           state.settings.watchSortMode = "";
           state.settings.watchSortDir = "desc";
         }
         saveState(state);
         renderWatchlistCards();
-        const moved = listEl.children[to];
+        const moved = $("watchCardList").querySelectorAll(".watch-card")[to];
         if (moved) {
           moved.classList.add("watch-card--snap");
           setTimeout(() => moved.classList.remove("watch-card--snap"), 500);
@@ -4747,7 +4905,6 @@
       });
     });
     if ($("btnFetchNews")) $("btnFetchNews").addEventListener("click", () => fetchEastmoneyAnn());
-    if ($("btnWatchAdd")) $("btnWatchAdd").addEventListener("click", watchAddCurrentToEmptySlot);
     if ($("btnWatchExport")) $("btnWatchExport").addEventListener("click", exportWatchTargets);
     if ($("btnWatchImport")) $("btnWatchImport").addEventListener("click", openWatchImportPicker);
     if ($("watchImportFile"))
@@ -4755,9 +4912,14 @@
         const file = e.target && e.target.files && e.target.files[0];
         importWatchTargetsFile(file);
       });
-    if ($("btnWatchDelete")) $("btnWatchDelete").addEventListener("click", watchDeleteCurrentSlot);
     document.querySelectorAll("[data-watch-sort]").forEach((btn) => {
       btn.addEventListener("click", () => sortWatchCardsBy(btn.getAttribute("data-watch-sort") || ""));
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".watch-card-menu")) closeWatchCardMenus();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeWatchCardMenus();
     });
     if ($("btnAddNewsManual"))
       $("btnAddNewsManual").addEventListener("click", () => {
