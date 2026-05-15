@@ -70,7 +70,7 @@
       padding: 0.75rem 0.65rem 0.65rem;
       max-height: calc(100vh - 1.5rem);
       min-height: 0;
-      overflow: hidden;
+      overflow: visible;
       display: flex;
       flex-direction: column;
     }
@@ -79,6 +79,7 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
       margin: 0 0 0.35rem;
+      padding-right: 2rem;
       color: var(--muted);
       font-weight: 600;
     }
@@ -312,19 +313,21 @@
       padding: 0.4rem 0.5rem;
     }
     .wrap {
+      position: relative;
       flex: 1;
       min-width: 0;
       max-width: none;
       padding-top: 0;
     }
     .chart-wrap {
+      position: relative;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 0.75rem 1rem 1rem;
       margin-bottom: 1rem;
     }
-    .chart-wrap h2 { margin-top: 0; }
+    .chart-wrap h2 { margin-top: 0; padding-right: 2rem; }
     .k-tabs {
       display: flex;
       flex-wrap: wrap;
@@ -539,6 +542,7 @@
 
     /* —— 策略状态条 —— */
     .signal {
+      position: relative;
       border-radius: var(--radius);
       padding: 1rem 1.15rem;
       margin-bottom: 1rem;
@@ -551,7 +555,7 @@
     .signal.state-hit-buy { border-left: 4px solid var(--buy); box-shadow: 0 0 0 1px rgba(61,220,132,0.35); }
     .signal.state-hit-sell { border-left: 4px solid var(--sell); box-shadow: 0 0 0 1px rgba(255,176,32,0.35); }
     .signal.state-idle { border-left: 4px solid #4a5568; }
-    .signal h3 { margin: 0 0 0.35rem; font-size: 1.05rem; font-weight: 650; }
+    .signal h3 { margin: 0 0 0.35rem; padding-right: 2rem; font-size: 1.05rem; font-weight: 650; }
     .signal p { margin: 0; font-size: 0.88rem; color: var(--muted); }
     .bar-track {
       height: 8px;
@@ -574,6 +578,7 @@
       grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     }
     section, .card {
+      position: relative;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -584,6 +589,7 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
       margin: 0 0 0.75rem;
+      padding-right: 2rem;
       color: var(--muted);
       font-weight: 600;
     }
@@ -686,12 +692,13 @@
     .section-intro {
       font-size: 0.78rem;
       line-height: 1.62;
-      color: var(--muted);
+      color: #a9b6c8;
       margin: 0 0 0.65rem;
-      padding: 0.55rem 0.65rem 0.55rem 0.75rem;
-      border-left: 3px solid var(--accent);
-      background: rgba(94, 176, 255, 0.09);
-      border-radius: 0 10px 10px 0;
+      padding: 0.7rem 0.8rem 0.7rem 0.85rem;
+      border: 1px solid rgba(94, 176, 255, 0.28);
+      border-left: 4px solid var(--accent);
+      background: rgba(12, 22, 35, 0.96);
+      border-radius: 10px;
     }
     .section-intro strong.il-h {
       display: inline-block;
@@ -707,36 +714,62 @@
     }
     .page-overview.section-intro {
       border-left-width: 4px;
-      background: rgba(94, 176, 255, 0.12);
     }
     .section-intro-wrap {
-      margin-bottom: 0.65rem;
+      position: absolute;
+      top: 0.9rem;
+      right: 1rem;
+      z-index: 90;
+      margin-bottom: 0;
+    }
+    .section-intro-wrap:hover,
+    .section-intro-wrap:has(.intro-help-trigger:focus-visible) {
+      z-index: 400;
     }
     .section-intro-wrap .intro-toggle-row {
       display: flex;
       justify-content: flex-end;
-      margin-bottom: 0.15rem;
+      margin-bottom: 0;
+    }
+    .section-intro-wrap .section-intro-toolbar-target {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 410;
+      width: min(520px, calc(100vw - 2rem));
+      padding-top: 0.35rem;
+    }
+    .section-intro-wrap:hover .section-intro-toolbar-target,
+    .section-intro-wrap:has(.intro-help-trigger:focus-visible) .section-intro-toolbar-target {
+      display: block;
     }
     .section-intro-wrap .section-intro-toolbar-target .section-intro {
       margin-bottom: 0;
+      background: rgba(12, 22, 35, 0.97) !important;
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.07);
     }
-    .section-intro-wrap.intro-collapsed .section-intro-toolbar-target {
-      display: none;
-    }
-    .btn-intro-toggle {
+    .intro-help-trigger {
+      width: 1.45rem;
+      height: 1.45rem;
+      display: inline-grid;
+      place-items: center;
       font-size: 0.68rem;
-      font-weight: 500;
+      font-weight: 800;
       color: var(--accent);
-      background: transparent;
+      background: rgba(94, 176, 255, 0.08);
       border: 1px solid rgba(94, 176, 255, 0.45);
-      border-radius: 6px;
-      padding: 0.1rem 0.38rem;
-      cursor: pointer;
-      line-height: 1.35;
+      border-radius: 999px;
+      padding: 0;
+      cursor: help;
+      line-height: 1;
     }
-    .btn-intro-toggle:hover {
+    .intro-help-trigger:hover,
+    .intro-help-trigger:focus-visible {
       background: rgba(94, 176, 255, 0.12);
       color: var(--text);
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(94, 176, 255, 0.18);
     }
     .disclaimer {
       font-size: 0.7rem;
@@ -797,7 +830,7 @@
       <h2>自选卡片</h2>
       <div class="section-intro-wrap" data-intro-key="watch">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -816,7 +849,7 @@
     <div class="wrap">
     <div class="section-intro-wrap" data-intro-key="page">
       <div class="intro-toggle-row">
-        <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+        <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
       </div>
       <div class="section-intro-toolbar-target">
         <div class="section-intro page-overview">
@@ -830,7 +863,7 @@
     <div class="hero" id="hero">
       <div class="section-intro-wrap" data-intro-key="hero">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -878,7 +911,7 @@
       <h2>K 线 · MACD（与现价同步刷新 · 分钟为实时更新）</h2>
       <div class="section-intro-wrap" data-intro-key="chart">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -906,7 +939,7 @@
       <h2>费用 · 盈亏 · 5% 净利目标价（测算）</h2>
       <div class="section-intro-wrap" data-intro-key="pnl">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -947,7 +980,7 @@
     <div class="signal state-watch" id="signalBox">
       <div class="section-intro-wrap" data-intro-key="signal">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro" style="margin-bottom:0.65rem;border-left-color:var(--sell);background:rgba(255,176,32,0.06);">
@@ -967,7 +1000,7 @@
         <h2>关键价位（下一笔）</h2>
         <div class="section-intro-wrap" data-intro-key="key-levels">
           <div class="intro-toggle-row">
-            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+            <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
           </div>
           <div class="section-intro-toolbar-target">
             <p class="section-intro">
@@ -983,7 +1016,7 @@
         <h2>持仓快照</h2>
         <div class="section-intro-wrap" data-intro-key="position">
           <div class="intro-toggle-row">
-            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+            <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
           </div>
           <div class="section-intro-toolbar-target">
             <p class="section-intro">
@@ -1002,7 +1035,7 @@
         <h2>标的与现价来源</h2>
         <div class="section-intro-wrap" data-intro-key="form-target">
           <div class="intro-toggle-row">
-            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+            <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
           </div>
           <div class="section-intro-toolbar-target">
             <p class="section-intro">
@@ -1042,7 +1075,7 @@
         <h2>成交记录</h2>
         <div class="section-intro-wrap" data-intro-key="ledger">
           <div class="intro-toggle-row">
-            <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+            <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
           </div>
           <div class="section-intro-toolbar-target">
             <p class="section-intro">
@@ -1087,7 +1120,7 @@
       <h2>计划表 · 策略参数（数字可改，改后自动重算计划与提示）</h2>
       <div class="section-intro-wrap" data-intro-key="plan-params">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1137,7 +1170,7 @@
       <h2>计划表（理论触发价）</h2>
       <div class="section-intro-wrap" data-intro-key="plan-table">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1170,7 +1203,7 @@
       <h2>实时仓位与买卖建议（随行情刷新）</h2>
       <div class="section-intro-wrap" data-intro-key="live-advice">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1199,7 +1232,7 @@
       <h2>自定义买点 / 计划买点</h2>
       <div class="section-intro-wrap" data-intro-key="buy-points">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1227,7 +1260,7 @@
       <h2>相关公告与新闻 v1.1（分类 · 多源 · 可展开）</h2>
       <div class="section-intro-wrap" data-intro-key="news">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1301,7 +1334,7 @@
       <h2>完整下一笔参数</h2>
       <div class="section-intro-wrap" data-intro-key="next-hints">
         <div class="intro-toggle-row">
-          <button type="button" class="btn-intro-toggle" aria-expanded="true">（隐藏介绍）</button>
+          <button type="button" class="intro-help-trigger" aria-label="悬停查看介绍" title="悬停查看介绍">?</button>
         </div>
         <div class="section-intro-toolbar-target">
           <p class="section-intro">
@@ -1368,7 +1401,6 @@
       lastWebNewsTags: [],
       newsPageSize: 20,
       newsListPage: 1,
-      collapsedIntros: {},
     });
 
     function loadState() {
@@ -1441,9 +1473,6 @@
 
     let state = loadState();
     if (!state.settings) state.settings = defaultSettings();
-    if (!state.settings.collapsedIntros || typeof state.settings.collapsedIntros !== "object") {
-      state.settings.collapsedIntros = {};
-    }
     if (!state.buyPoints) state.buyPoints = [];
     if (!state.adviceHistory) state.adviceHistory = [];
     if (!state.newsItems) state.newsItems = [];
@@ -1456,37 +1485,6 @@
     if (!localStorage.getItem(STORAGE_V2)) saveState(state);
 
     const $ = (id) => document.getElementById(id);
-
-    function applyIntroTogglesFromSettings() {
-      const m = (state.settings && state.settings.collapsedIntros) || {};
-      document.querySelectorAll(".section-intro-wrap[data-intro-key]").forEach((wrap) => {
-        const k = wrap.getAttribute("data-intro-key");
-        if (!k) return;
-        const collapsed = !!m[k];
-        wrap.classList.toggle("intro-collapsed", collapsed);
-        const btn = wrap.querySelector(".btn-intro-toggle");
-        if (btn) {
-          btn.textContent = collapsed ? "（展开介绍）" : "（隐藏介绍）";
-          btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        }
-      });
-    }
-
-    document.body.addEventListener("click", (e) => {
-      const btn = e.target.closest(".btn-intro-toggle");
-      if (!btn) return;
-      const wrap = btn.closest(".section-intro-wrap");
-      if (!wrap) return;
-      const key = wrap.getAttribute("data-intro-key");
-      if (!key) return;
-      e.preventDefault();
-      if (!state.settings.collapsedIntros || typeof state.settings.collapsedIntros !== "object") {
-        state.settings.collapsedIntros = {};
-      }
-      state.settings.collapsedIntros[key] = !state.settings.collapsedIntros[key];
-      saveState(state);
-      applyIntroTogglesFromSettings();
-    });
 
     let quote = { price: null, prevClose: null, apiName: null, updated: null, error: null, source: null };
     let cardQuotes = {};
@@ -3294,7 +3292,6 @@
       if ($("newsRss2JsonKey")) $("newsRss2JsonKey").value = String(st.newsRss2JsonKey || "");
       if ($("newsPageSizeSelect")) $("newsPageSizeSelect").value = String(coerceNewsPageSize(st.newsPageSize));
       syncNewsCatTabButtons();
-      applyIntroTogglesFromSettings();
     }
 
     function flushCurrentSnapshot() {
