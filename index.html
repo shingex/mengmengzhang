@@ -3329,11 +3329,7 @@
     function exportWatchTargets() {
       flushCurrentSnapshot();
       const targets = (state.watchlist || [])
-        .map((slot, index) => ({
-          slot: index + 1,
-          code: String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6),
-          name: String((slot && slot.name) || (cardQuotes[String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6)] || {}).name || "").trim(),
-        }))
+        .map((slot, index) => buildWatchTargetExport(slot, index))
         .filter((item) => item.code.length === 6 || item.name);
       if (!targets.length) {
         showAlert("暂无可导出的标的。", "bad");
@@ -3341,7 +3337,7 @@
       }
       const payload = {
         type: "mengmengzhang-watch-targets",
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         targets,
       };
@@ -3356,6 +3352,55 @@
         a.remove();
       }, 0);
       showAlert("已导出 " + targets.length + " 个标的。", "ok");
+    }
+
+    function buildWatchTargetExport(slot, index) {
+      const code = String((slot && slot.code) || "").replace(/\D/g, "").slice(0, 6);
+      const name = String((slot && slot.name) || (cardQuotes[code] || {}).name || "").trim();
+      const ledger = getWatchLedgerForCode(code);
+      const pos = aggregatePosition(ledger, 100);
+      const target = {
+        slot: index + 1,
+        code,
+        name,
+        ledger,
+      };
+      if (pos.shares > 0) {
+        target.position = {
+          shares: pos.shares,
+          costBasis: roundMoney(pos.costBasis),
+          avgPrice: roundPrice(pos.avgPrice),
+        };
+      }
+      return target;
+    }
+
+    function getWatchLedgerForCode(code6) {
+      if (code6.length !== 6) return [];
+      const snap = state.stockSnapshots && state.stockSnapshots[code6];
+      const ledger = snap && Array.isArray(snap.ledger) ? snap.ledger : [];
+      return normalizeWatchLedgerEntries(ledger);
+    }
+
+    function normalizeWatchLedgerEntries(ledger) {
+      if (!Array.isArray(ledger)) return [];
+      return ledger
+        .map((entry) => {
+          const type = String((entry && entry.type) || "").toLowerCase() === "sell" ? "sell" : "buy";
+          const shares = Number(entry && entry.shares);
+          const price = Number(entry && entry.price);
+          if (!(shares > 0) || !(price > 0)) return null;
+          return { type, shares, price };
+        })
+        .filter(Boolean);
+    }
+
+    function roundMoney(n) {
+      return Math.round(Number(n || 0) * 100) / 100;
+    }
+
+    function roundPrice(n) {
+      return Math.round(Number(n || 0) * 1000) / 1000;
     }
 
     function openWatchImportPicker() {
@@ -3402,8 +3447,10 @@
         .map((line) => {
           const parts = line.split(/[,，\t]/).map((part) => part.trim());
           const code = (parts[0] || "").replace(/\D/g, "").slice(0, 6);
-          const name = parts.slice(1).join(" ").trim();
-          return { code, name };
+          const hasPositionOnly = parts.length === 2 && /[@＠]/.test(parts[1]);
+          const name = hasPositionOnly ? "" : (parts[1] || "").trim();
+          const positionText = hasPositionOnly ? parts[1] : parts.slice(2).join(" ");
+          return { code, name, ledger: parseImportedPositionText(positionText) };
         });
       return normalizeImportedWatchTargets(rows);
     }
@@ -3415,14 +3462,62 @@
         const source = typeof item === "string" ? { code: item, name: "" } : item || {};
         const code = String(source.code || source.代码 || source.symbol || "").replace(/\D/g, "").slice(0, 6);
         const name = String(source.name || source.名称 || source.title || "").trim();
+        const ledger = normalizeImportedWatchLedger(source);
         if (code.length !== 6) continue;
         if (seen.has(code)) continue;
         seen.add(code);
-        out.push({ code, name });
+        out.push({ code, name, ledger });
         if (out.length >= WATCH_SLOT_COUNT) break;
       }
       if (!out.length) throw new Error("导入失败：没有识别到有效的 6 位股票代码。");
       return out;
+    }
+
+    function normalizeImportedWatchLedger(source) {
+      const explicit = source.ledger || source.transactions || source.trades || source.成交记录;
+      const ledger = normalizeWatchLedgerEntries(
+        Array.isArray(explicit)
+          ? explicit.map((entry) => ({
+              type: parseImportedLedgerType(entry),
+              shares: parseLooseNumber(entry.shares ?? entry.股数 ?? entry.quantity ?? entry.qty ?? entry.amount),
+              price: parseLooseNumber(entry.price ?? entry.价格 ?? entry.buyPrice ?? entry.买入价 ?? entry.sellPrice ?? entry.卖出价),
+            }))
+          : []
+      );
+      if (ledger.length) return ledger;
+      const holder = source.position || source.holding || source.持仓 || source;
+      const shares = parseLooseNumber(holder.shares ?? holder.股数 ?? holder.positionShares ?? holder.holdingShares ?? source.shares);
+      const price = parseLooseNumber(
+        holder.avgPrice ?? holder.buyPrice ?? holder.entryPrice ?? holder.price ?? holder.买入价 ?? holder.均价 ?? source.avgPrice ?? source.buyPrice
+      );
+      return shares > 0 && price > 0 ? [{ type: "buy", shares, price }] : [];
+    }
+
+    function parseImportedPositionText(text) {
+      const raw = String(text || "").trim();
+      if (!raw) return [];
+      const atMatch = raw.match(/([\d,]+(?:\.\d+)?)\s*(?:股)?\s*[@＠]\s*([\d,]+(?:\.\d+)?)/);
+      if (atMatch) {
+        const shares = parseLooseNumber(atMatch[1]);
+        const price = parseLooseNumber(atMatch[2]);
+        return shares > 0 && price > 0 ? [{ type: "buy", shares, price }] : [];
+      }
+      const parts = raw.split(/\s+/);
+      const shares = parseLooseNumber(parts[0]);
+      const price = parseLooseNumber(parts[1]);
+      return shares > 0 && price > 0 ? [{ type: "buy", shares, price }] : [];
+    }
+
+    function parseImportedLedgerType(entry) {
+      const raw = String((entry && (entry.type ?? entry.类型 ?? entry.action ?? entry.方向)) || "").toLowerCase();
+      if (raw.includes("sell") || raw.includes("卖")) return "sell";
+      return "buy";
+    }
+
+    function parseLooseNumber(value) {
+      if (value == null || value === "") return NaN;
+      if (typeof value === "number") return value;
+      return Number(String(value).replace(/,/g, "").replace(/[^\d.+-]/g, ""));
     }
 
     function applyImportedWatchTargets(targets) {
@@ -3432,6 +3527,15 @@
       const next = defaultWatchlist().map(() => ({ code: "", name: "" }));
       targets.slice(0, WATCH_SLOT_COUNT).forEach((target, i) => {
         next[i] = { code: target.code, name: target.name };
+        if (target.ledger && target.ledger.length) {
+          if (!state.stockSnapshots) state.stockSnapshots = {};
+          const prev = state.stockSnapshots[target.code] || {};
+          state.stockSnapshots[target.code] = {
+            ...prev,
+            stockName: target.name || prev.stockName || target.code,
+            ledger: normalizeWatchLedgerEntries(target.ledger),
+          };
+        }
       });
       const currentCode = String((state.watchlist[state.activeWatchIndex] || {}).code || "").replace(/\D/g, "").slice(0, 6);
       state.watchlist = next;
